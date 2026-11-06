@@ -87,6 +87,14 @@ El Unity Hub del usuario se ejecuta como paquete MSIX (`WindowsApps`), por lo qu
   - *Aprendizaje clave 1*: Sincronización obligatoria con la base de datos MSIX de Unity Hub (`LocalCache\Roaming\UnityHub\hub.db`) para que el proyecto sea visible en la interfaz gráfica de Unity Hub.
   - *Aprendizaje clave 2*: Liberación inmediata de instancias `-batchmode` y `Temp\UnityLockfile` para evitar el error de instancia duplicada cuando el usuario abre el proyecto desde Unity Hub.
   - *Aprendizaje clave 3*: Creación de escenas URP mediante copia de plantilla (`asset copy`) en lugar de `scene create` para evitar bloqueos por diálogos modales nativos.
-- **Siguiente commit — Documentación viva (`AGENTS.md`) y Diseño Técnico**:
+- **`05886fc` — Documentación viva (`AGENTS.md`) y Diseño Técnico**:
   - Creación de `AGENTS.md` en la raíz del repositorio y en la raíz del workspace (`D:\Unity Antigravity\AGENTS.md`).
   - Definición de la arquitectura de automatización en Primera Persona 3D con construcción en Grid.
+- **Fase 1 — Entorno Base Cryo-Industrial y Controlador en Primera Persona**:
+  - Creación de `Palette.cs` (`Assets/_Project/Scripts/Core/Palette.cs`) como fuente única de verdad visual (estilo *Cryo-Industrial Alpine*).
+  - Creación de `FirstPersonController.cs` (`Assets/_Project/Scripts/Gameplay/FirstPersonController.cs`) con `CharacterController` y nuevo `InputSystem` (`WASD`, Sprint `LeftShift`, Salto `Space`, rotación de cámara y bloqueo/desbloqueo de cursor con `Esc`).
+  - Configuración de `MainGame.unity` con materiales URP Lit/Emissive, Skybox ártico procedural (`M_ArcticSkybox.mat`), iluminación direccional cálida con sombras suaves, ambiente Trilight y `SnowFactoryVolumeProfile.asset` (ACES Tonemapping, Bloom HDR, Vignette y Color Adjustments).
+  - Construcción de la plataforma industrial de hormigón (`24x24`), patio exterior nevado (`60x60`), muro norte con pilares y balizas luminosas, silos criogénicos y montículos de extracción de nieve.
+  - Configuración del jugador con `CinemachineBrain` y `CinemachineCamera` (Cinemachine 3.1, FOV 68°).
+  - *Aprendizaje clave 4*: En `com.unity.pipeline` (`0.10.0-exp.1`), cuando el Editor está sin foco en Windows, `script recompile --focus true` fuerza la recarga inmediata del dominio. Para scripts constructores complejos de escena, `unity command script run --file Temp/<Builder>.cs --entry <Type.Method>` compila y ejecuta en memoria (~1.5 s) sin provocar recarga de dominio ni problemas de escapado de comillas de PowerShell.
+  - *Aprendizaje clave 5*: El comando `capture game_view` en `com.unity.pipeline 0.10.0` utiliza el parámetro `--output-path <ruta>` (y `--source camera` cuando la pestaña Game View no está visible en primer plano), no `--save_path`.
