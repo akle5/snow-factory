@@ -90,7 +90,7 @@ El Unity Hub del usuario se ejecuta como paquete MSIX (`WindowsApps`), por lo qu
 - **`05886fc` — Documentación viva (`AGENTS.md`) y Diseño Técnico**:
   - Creación de `AGENTS.md` en la raíz del repositorio y en la raíz del workspace (`D:\Unity Antigravity\AGENTS.md`).
   - Definición de la arquitectura de automatización en Primera Persona 3D con construcción en Grid.
-- **Fase 1 — Entorno Base Cryo-Industrial y Controlador en Primera Persona**:
+- **`ecabf1c` — Fase 1: Entorno Base Cryo-Industrial y Controlador en Primera Persona**:
   - Creación de `Palette.cs` (`Assets/_Project/Scripts/Core/Palette.cs`) como fuente única de verdad visual (estilo *Cryo-Industrial Alpine*).
   - Creación de `FirstPersonController.cs` (`Assets/_Project/Scripts/Gameplay/FirstPersonController.cs`) con `CharacterController` y nuevo `InputSystem` (`WASD`, Sprint `LeftShift`, Salto `Space`, rotación de cámara y bloqueo/desbloqueo de cursor con `Esc`).
   - Configuración de `MainGame.unity` con materiales URP Lit/Emissive, Skybox ártico procedural (`M_ArcticSkybox.mat`), iluminación direccional cálida con sombras suaves, ambiente Trilight y `SnowFactoryVolumeProfile.asset` (ACES Tonemapping, Bloom HDR, Vignette y Color Adjustments).
@@ -98,3 +98,15 @@ El Unity Hub del usuario se ejecuta como paquete MSIX (`WindowsApps`), por lo qu
   - Configuración del jugador con `CinemachineBrain` y `CinemachineCamera` (Cinemachine 3.1, FOV 68°).
   - *Aprendizaje clave 4*: En `com.unity.pipeline` (`0.10.0-exp.1`), cuando el Editor está sin foco en Windows, `script recompile --focus true` fuerza la recarga inmediata del dominio. Para scripts constructores complejos de escena, `unity command script run --file Temp/<Builder>.cs --entry <Type.Method>` compila y ejecuta en memoria (~1.5 s) sin provocar recarga de dominio ni problemas de escapado de comillas de PowerShell.
   - *Aprendizaje clave 5*: El comando `capture game_view` en `com.unity.pipeline 0.10.0` utiliza el parámetro `--output-path <ruta>` (y `--source camera` cuando la pestaña Game View no está visible en primer plano), no `--save_path`.
+- **Base Jugable Completa (Grid + Construcción/Demolición + Bucle de Máquinas + HUD Minimalista)**:
+  - Consolidación de las fases restantes en una única **Base Jugable Funcional** lista para iterar, hacer y deshacer libremente.
+  - Scripts creados (1 `MonoBehaviour`/`ScriptableObject` por archivo):
+    - `FactoryTypes.cs` y `FactoryEvents.cs` (`Assets/_Project/Scripts/Core/`): Tipos de máquinas/ítems y bus de eventos desacoplado.
+    - `GridManager.cs` (`Assets/_Project/Scripts/Managers/`): Cuadrícula de `12x12` celdas de `2x2 m` sobre la plataforma de hormigón (`24x24 m`), auto-registro de máquinas pre-colocadas en `Start()` y consulta de vecinos por orientación.
+    - `EconomyManager.cs` (`Assets/_Project/Scripts/Managers/`): Gestión de créditos (`$250` iniciales), cobro al construir y reembolso del 75% al demoler.
+    - `BuildManager.cs` (`Assets/_Project/Scripts/Managers/`): Selección con teclas `1–4`, holograma `BuildGhostPreview` (cian válido / rojo inválido), rotación de 90° (`R`), colocación (`Clic Izquierdo`), demolición (`Clic Derecho` o `X`), depósito manual de nieve (`E`) y cambio de modo (`B`/`Tab`).
+    - `BuildableMachineSO.cs` y `PlacedMachine.cs` (`Assets/_Project/Scripts/Gameplay/`): 4 máquinas base (`PF_SnowExtractor`, `PF_ConveyorBelt`, `PF_SnowCompactor`, `PF_DeliveryHub`) y sus `ScriptableObjects` en `Assets/_Project/Settings/`, con movimiento visual de bloques de nieve (`RawSnow`) y bloques de hielo compactado (`CompactedIce`).
+    - `FactoryHudController.cs` (`Assets/_Project/Scripts/UI/`): HUD minimalista con contador de créditos, máquina seleccionada y barra inferior de atajos.
+  - Línea de producción inicial (`StarterFactoryLine`) pre-instalada en el centro de la planta para que el bucle económico funcione desde el segundo 1 en PlayMode.
+  - *Aprendizaje clave 6*: En Unity 6, `Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")` es la fuente built-in válida para `UnityEngine.UI.Text` (en lugar de `Arial.ttf`, que lanza excepción en versiones recientes).
+  - *Aprendizaje clave 7*: En `FirstPersonController`, inicializar `_cameraPitch` en `Awake()` (ej. `initialPitchAngle = 14f`) evita que el primer frame de `Update()` sobrescriba a `0°` la inclinación vertical configurada en la escena cuando la ventana del Editor no tiene el cursor bloqueado.

@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 924bb1d9425e81744918973305bdbbb5, type: 3}
+  m_Name: SO_ConveyorBelt
+  m_EditorClassIdentifier: Assembly-CSharp::SnowFactory.Gameplay.BuildableMachineSO
+  machineId: conveyor
+  displayName: Cinta Transportadora
+  description: Factory machine.
+  category: 1
+  buildCost: 10
+  cycleDuration: 0.85
+  prefab: {fileID: 2412126041237095254, guid: 5d45ff7cfeff2a341bb0470345286d7d, type: 3}

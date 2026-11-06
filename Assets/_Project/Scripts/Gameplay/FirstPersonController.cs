@@ -20,6 +20,7 @@ namespace SnowFactory.Gameplay
         [SerializeField] private Transform cameraRoot;
         [SerializeField] private float mouseSensitivity = 0.14f;
         [SerializeField] private float maxPitchAngle = 85f;
+        [SerializeField] private float initialPitchAngle = 14f;
         [SerializeField] private bool lockCursorOnStart = true;
 
         private CharacterController _controller;
@@ -33,6 +34,7 @@ namespace SnowFactory.Gameplay
         private void Awake()
         {
             _controller = GetComponent<CharacterController>();
+            _cameraPitch = initialPitchAngle;
 
             if (cameraRoot == null)
             {
@@ -41,6 +43,11 @@ namespace SnowFactory.Gameplay
                 {
                     cameraRoot = found;
                 }
+            }
+
+            if (cameraRoot != null)
+            {
+                cameraRoot.localRotation = Quaternion.Euler(_cameraPitch, 0f, 0f);
             }
         }
 
