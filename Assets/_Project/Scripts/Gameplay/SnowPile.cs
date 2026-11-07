@@ -189,7 +189,7 @@ namespace SnowFactory.Gameplay
 
         public bool TryScoop()
         {
-            return TryScoopAtPoint(transform.position + Vector3.up * 0.4f);
+            return TryScoopAtPoint(transform.position + Vector3.up * 0.4f, 1.0f);
         }
 
         public void RefillPile()
@@ -204,7 +204,7 @@ namespace SnowFactory.Gameplay
             BuildOrganicSnowDriftMesh();
         }
 
-        public bool TryScoopAtPoint(Vector3 worldHitPoint)
+        public bool TryScoopAtPoint(Vector3 worldHitPoint, float radiusMultiplier = 1.0f)
         {
             if (_remainingScoops <= 0)
             {
@@ -220,17 +220,18 @@ namespace SnowFactory.Gameplay
                 scoopBurstParticles.Play();
             }
 
-            CarveCraterAtWorldPoint(worldHitPoint);
+            CarveCraterAtWorldPoint(worldHitPoint, radiusMultiplier);
             UpdateOverallVolumeScale();
             return true;
         }
 
-        private void CarveCraterAtWorldPoint(Vector3 worldHitPoint)
+        private void CarveCraterAtWorldPoint(Vector3 worldHitPoint, float radiusMultiplier)
         {
             if (_deformableMesh == null || _vertices == null) return;
 
             Vector3 localHit = transform.InverseTransformPoint(worldHitPoint);
-            float sqrRadius = craterRadius * craterRadius;
+            float effectiveRadius = craterRadius * Mathf.Clamp(radiusMultiplier, 0.8f, 2.2f);
+            float sqrRadius = effectiveRadius * effectiveRadius;
 
             for (int i = 0; i < _vertices.Length; i++)
             {
@@ -242,7 +243,7 @@ namespace SnowFactory.Gameplay
                 if (distSq < sqrRadius)
                 {
                     float dist = Mathf.Sqrt(distSq);
-                    float normalized = dist / craterRadius;
+                    float normalized = dist / effectiveRadius;
 
                     // Crater depression in the center + subtle pushed-up snow rim around the edge
                     float falloff = Mathf.Cos(normalized * Mathf.PI * 0.5f);

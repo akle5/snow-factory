@@ -77,11 +77,12 @@ Shader "SnowFactory/PremiumSnowURP"
 
             struct Varyings
             {
-                float4 positionCS : SV_POSITION;
-                float3 positionWS : TEXCOORD0;
-                float3 normalWS   : TEXCOORD1;
-                float4 vertexCol  : TEXCOORD2;
-                float  fogFactor  : TEXCOORD3;
+                float4 positionCS        : SV_POSITION;
+                float3 positionWS        : TEXCOORD0;
+                float3 normalWS          : TEXCOORD1;
+                float4 vertexCol         : TEXCOORD2;
+                float  fogFactor         : TEXCOORD3;
+                float3 positionOS_cached : TEXCOORD4;
             };
 
             // Fast 3D hash for procedural snow grains and ice crystal facets
@@ -141,6 +142,7 @@ Shader "SnowFactory/PremiumSnowURP"
                 output.normalWS = normInputs.normalWS;
                 output.vertexCol = input.color;
                 output.fogFactor = ComputeFogFactor(posInputs.positionCS.z);
+                output.positionOS_cached = posInputs.positionWS;
                 return output;
             }
 
@@ -198,19 +200,23 @@ Shader "SnowFactory/PremiumSnowURP"
                 float hearthAtten = saturate(1.0 / (1.0 + distSq * 0.14)) * saturate(1.0 - distSq / 85.0);
                 float3 additionalLightsColor = float3(1.0, 0.48, 0.14) * (hearthWrap * hearthAtten * 0.95);
 
-                // 4. View-Dependent Ice Crystal Micro-Sparkles (Journey / Horizon style)
-                float3 crystalCell = floor(posWS * _SparkleScale);
-                float3 crystalFacetDir = normalize(Hash33(crystalCell) * 2.0 - 1.0);
-                float3 halfVec = normalize(mainLight.direction + viewDirWS * 1.35);
+                // 4. View-Dependent Ice Crystal Micro-Sparkles (Circular organic glints in Object Space — no boxy grid cells!)
+                float3 osPos = input.positionOS_cached * _SparkleScale;
+                float3 cellId = floor(osPos);
+                float3 cellLocal = frac(osPos) - 0.5;
+                float3 rnd = Hash33(cellId);
+
+                // Random jittered center inside the cell + circular radial falloff so glints are tiny round pinpricks
+                float3 glintOffset = (rnd - 0.5) * 0.55;
+                float distToGlint = length(cellLocal - glintOffset);
+                float circularDot = 1.0 - smoothstep(0.04, 0.19, distToGlint);
+
+                float3 crystalFacetDir = normalize(rnd * 2.0 - 1.0);
+                float3 halfVec = normalize(mainLight.direction + viewDirWS * 1.45);
                 float crystalAlign = abs(dot(crystalFacetDir, halfVec));
-                float sparkleMask = smoothstep(_SparkleThreshold, 0.998, crystalAlign);
+                float sparkleMask = circularDot * smoothstep(_SparkleThreshold, 0.995, crystalAlign);
 
-                // Secondary finer glitter layer that shifts faster with camera movement
-                float3 fineCell = floor(posWS * (_SparkleScale * 1.85) + viewDirWS * 2.2);
-                float3 fineDir = normalize(Hash33(fineCell) * 2.0 - 1.0);
-                float fineSparkle = smoothstep(_SparkleThreshold + 0.03, 0.999, abs(dot(fineDir, viewDirWS)));
-
-                float totalSparkle = (sparkleMask + fineSparkle * 0.85) * saturate(0.25 + litFactor * 0.85);
+                float totalSparkle = sparkleMask * saturate(0.25 + litFactor * 0.85);
                 float3 sparkleEmission = _SparkleColor.rgb * (totalSparkle * _SparkleIntensity);
 
                 // 5. Velvet Fresnel Rim Glow for soft powdery silhouette

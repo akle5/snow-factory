@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using SnowFactory.Core;
@@ -5,51 +6,86 @@ using SnowFactory.Core;
 namespace SnowFactory.Gameplay
 {
     /// <summary>
-    /// First-person equipped shovel controller with stackable snow capacity.
-    /// Allows scooping multiple snow loads onto the blade (growing visually in size and height)
-    /// before delivering the full stack into the FireplaceHearth for Heat Coins + Batch Bonus.
-    /// Also supports upgrading shovel capacity with [U] and refilling depleted snow piles with [R].
+    /// First-person equipped shovel controller combining:
+    /// - Option A: Organic multi-clump snow bed filling the concave pan horizontally (never a giant vertical egg)
+    ///   + physical parabolic flying snow chunks when scooping from a drift and when throwing into the fireplace.
+    /// - Option B: Shovel upgrades [U] physically widen the metal ScoopHead blade so a larger pan holds more snow
+    ///   naturally and carves wider craters per scoop.
     /// </summary>
     public class ShovelController : MonoBehaviour
     {
+        private class FlyingSnowChunk
+        {
+            public Transform ChunkTransform;
+            public Transform FollowTarget;
+            public Vector3 StartWorldPos;
+            public Vector3 EndWorldPos;
+            public float Elapsed;
+            public float Duration;
+            public float ArcHeight;
+            public bool IsScoopInward;
+            public FireplaceHearth TargetFireplace;
+            public int DeliveredScoopReward;
+        }
+
         [Header("Shovel References")]
         [SerializeField] private Transform shovelPivot;
+        [SerializeField] private Transform scoopHead;
         [SerializeField] private GameObject heldSnowVisual;
         [SerializeField] private float interactDistance = 5.5f;
 
-        [Header("Stackable Capacity & Upgrades")]
+        [Header("Capacity & Wide-Blade Upgrades")]
         [SerializeField] private int maxSnowCapacity = 3;
         [SerializeField] private int upgradeCapacityStep = 2;
         [SerializeField] private int nextUpgradeCost = 30;
 
         private int _currentSnowLoad;
+        private int _bladeUpgradeLevel;
         private float _swingAnimTimer;
         private Quaternion _restLocalRotation;
         private Vector3 _restLocalPosition;
-        private Vector3 _baseSnowLocalPos = new Vector3(0f, 0.055f, 0.01f);
-        private Vector3 _baseSnowLocalScale = new Vector3(0.27f, 0.13f, 0.26f);
+        private Vector3 _baseScoopHeadScale = Vector3.one;
         private FireplaceHearth _cachedHearth;
+        private Material _snowMaterial;
+
+        private readonly List<Transform> _bladeClumpVisuals = new List<Transform>();
+        private readonly List<FlyingSnowChunk> _flyingChunks = new List<FlyingSnowChunk>();
+
+        // Pre-computed organic positions inside the concave pan (rear-to-front, left-to-right, low profile!)
+        private static readonly Vector3[] ClumpLocalOffsets =
+        {
+            new Vector3(-0.06f, 0.032f, -0.05f),
+            new Vector3( 0.06f, 0.034f, -0.04f),
+            new Vector3( 0.00f, 0.030f,  0.05f),
+            new Vector3(-0.08f, 0.035f,  0.04f),
+            new Vector3( 0.08f, 0.035f,  0.04f),
+            new Vector3( 0.00f, 0.056f, -0.02f),
+            new Vector3(-0.05f, 0.054f,  0.02f),
+            new Vector3( 0.05f, 0.054f,  0.01f),
+            new Vector3( 0.00f, 0.048f,  0.09f)
+        };
+
+        private static readonly Vector3[] ClumpLocalScales =
+        {
+            new Vector3(0.16f, 0.065f, 0.14f),
+            new Vector3(0.15f, 0.068f, 0.15f),
+            new Vector3(0.17f, 0.060f, 0.14f),
+            new Vector3(0.14f, 0.062f, 0.13f),
+            new Vector3(0.14f, 0.062f, 0.13f),
+            new Vector3(0.18f, 0.065f, 0.16f),
+            new Vector3(0.15f, 0.060f, 0.14f),
+            new Vector3(0.15f, 0.060f, 0.14f),
+            new Vector3(0.16f, 0.055f, 0.12f)
+        };
 
         public int CurrentSnowLoad => _currentSnowLoad;
         public int MaxSnowCapacity => maxSnowCapacity;
         public int NextUpgradeCost => nextUpgradeCost;
-        public bool HasSnowLoaded => _currentSnowLoad > 0;
-        public bool IsFull => _currentSnowLoad >= maxSnowCapacity;
 
         private void Awake()
         {
-            if (shovelPivot != null)
-            {
-                _restLocalPosition = shovelPivot.localPosition;
-                _restLocalRotation = shovelPivot.localRotation;
-            }
-
-            if (heldSnowVisual != null)
-            {
-                _baseSnowLocalPos = heldSnowVisual.transform.localPosition;
-                _baseSnowLocalScale = heldSnowVisual.transform.localScale;
-                heldSnowVisual.SetActive(false);
-            }
+            ResolveReferences();
+            BuildMultiClumpBedOnShovel();
         }
 
         private void Start()
@@ -62,23 +98,85 @@ namespace SnowFactory.Gameplay
         {
             shovelPivot = pivot;
             heldSnowVisual = snowChunkOnBlade;
+            ResolveReferences();
+        }
 
+        private void ResolveReferences()
+        {
             if (shovelPivot != null)
             {
                 _restLocalPosition = shovelPivot.localPosition;
                 _restLocalRotation = shovelPivot.localRotation;
+
+                if (scoopHead == null)
+                {
+                    scoopHead = shovelPivot.Find("ScoopHead");
+                }
+            }
+
+            if (scoopHead != null)
+            {
+                _baseScoopHeadScale = scoopHead.localScale;
             }
 
             if (heldSnowVisual != null)
             {
-                _baseSnowLocalPos = heldSnowVisual.transform.localPosition;
-                _baseSnowLocalScale = heldSnowVisual.transform.localScale;
+                MeshRenderer mr = heldSnowVisual.GetComponent<MeshRenderer>();
+                if (mr != null)
+                {
+                    _snowMaterial = mr.sharedMaterial;
+                }
+                // Hide the old single sphere so it never turns into an egg
                 heldSnowVisual.SetActive(false);
+            }
+        }
+
+        private void BuildMultiClumpBedOnShovel()
+        {
+            if (scoopHead == null) return;
+
+            Transform existingRoot = scoopHead.Find("ClumpBedRoot");
+            if (existingRoot != null)
+            {
+                Destroy(existingRoot.gameObject);
+            }
+
+            GameObject bedRoot = new GameObject("ClumpBedRoot");
+            bedRoot.transform.SetParent(scoopHead, false);
+            bedRoot.transform.localPosition = Vector3.zero;
+            bedRoot.transform.localRotation = Quaternion.identity;
+
+            _bladeClumpVisuals.Clear();
+
+            for (int i = 0; i < ClumpLocalOffsets.Length; i++)
+            {
+                GameObject clump = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                clump.name = $"SnowClump_{i}";
+                clump.transform.SetParent(bedRoot.transform, false);
+                clump.transform.localPosition = ClumpLocalOffsets[i];
+                clump.transform.localRotation = Quaternion.Euler(
+                    (i * 13f) % 18f - 9f,
+                    (i * 47f) % 360f,
+                    (i * 19f) % 16f - 8f);
+                clump.transform.localScale = ClumpLocalScales[i];
+
+                Collider col = clump.GetComponent<Collider>();
+                if (col != null) Destroy(col);
+
+                if (_snowMaterial != null)
+                {
+                    MeshRenderer mr = clump.GetComponent<MeshRenderer>();
+                    if (mr != null) mr.sharedMaterial = _snowMaterial;
+                }
+
+                clump.SetActive(false);
+                _bladeClumpVisuals.Add(clump.transform);
             }
         }
 
         private void Update()
         {
+            UpdateFlyingSnowChunks();
             UpdateHoverAndInteract();
             HandleUpgradeAndRefillShortcuts();
             AnimateShovelSwing();
@@ -99,42 +197,33 @@ namespace SnowFactory.Gameplay
                 hoveredFireplace = hit.collider.GetComponentInParent<FireplaceHearth>();
             }
 
-            // Build contextual prompt based on current stack load and what the player is looking at
             if (hoveredFireplace != null && _currentSnowLoad > 0)
             {
                 FactoryEvents.RaisePromptChanged(
-                    $"[Clic Izq / E] Echar {_currentSnowLoad} palada(s) al fuego   |   [U] Mejorar Capacidad (+{upgradeCapacityStep}) por {nextUpgradeCost} Monedas");
+                    $"[Clic Izq / E] Lanzar {_currentSnowLoad} palada(s) al fuego   |   [U] Pala Ancha Nv.{_bladeUpgradeLevel + 2} ({nextUpgradeCost} Monedas)");
             }
             else if (hoveredPile != null && hoveredPile.HasSnow)
             {
                 if (_currentSnowLoad < maxSnowCapacity)
                 {
                     FactoryEvents.RaisePromptChanged(
-                        $"[Clic Izq / E] Recoger nieve en la pala ({_currentSnowLoad}/{maxSnowCapacity} cargadas) — Quedan {hoveredPile.RemainingScoops} en el montón");
+                        $"[Clic Izq / E] Excavar nieve ({_currentSnowLoad}/{maxSnowCapacity} en pala) — Quedan {hoveredPile.RemainingScoops} en el montón");
                 }
                 else
                 {
                     FactoryEvents.RaisePromptChanged(
-                        $"¡Pala llena al máximo ({_currentSnowLoad}/{maxSnowCapacity})! Llévala a la chimenea para fundirla");
+                        $"¡Pala llena ({_currentSnowLoad}/{maxSnowCapacity})! Apunta a la chimenea para lanzar la nieve al fuego");
                 }
             }
             else if (_currentSnowLoad > 0)
             {
-                if (_currentSnowLoad < maxSnowCapacity)
-                {
-                    FactoryEvents.RaisePromptChanged(
-                        $"Pala con {_currentSnowLoad}/{maxSnowCapacity} de nieve — Sigue recogiendo más o échalas a la chimenea");
-                }
-                else
-                {
-                    FactoryEvents.RaisePromptChanged(
-                        $"¡Pala llena ({_currentSnowLoad}/{maxSnowCapacity})! Apunta a la chimenea con fuego para vaciarla");
-                }
+                FactoryEvents.RaisePromptChanged(
+                    $"Pala con {_currentSnowLoad}/{maxSnowCapacity} de nieve — Apunta a la chimenea para lanzarla al fuego");
             }
             else
             {
                 FactoryEvents.RaisePromptChanged(
-                    $"Apunta al montón de nieve para cargar la pala (0/{maxSnowCapacity})   |   [U] Mejorar Pala ({nextUpgradeCost} Monedas)   |   [R] Nueva Nevada");
+                    $"Apunta al montón de nieve para excavar (0/{maxSnowCapacity})   |   [U] Ensanchar Pala ({nextUpgradeCost} Monedas)   |   [R] Nueva Nevada");
             }
 
             if (Cursor.lockState != CursorLockMode.Locked) return;
@@ -144,37 +233,159 @@ namespace SnowFactory.Gameplay
 
             if (!actionPressed) return;
 
-            // Priority 1: If looking at the fireplace and carrying at least 1 scoop, throw all accumulated scoops into the fire!
+            // Priority 1: Throw snow chunks in a physical parabolic arc into the fireplace!
             if (hoveredFireplace != null && _currentSnowLoad > 0)
             {
                 int deliveredCount = _currentSnowLoad;
                 _currentSnowLoad = 0;
-                _swingAnimTimer = 0.34f;
-                UpdateHeldSnowStackVisual();
+                _swingAnimTimer = 0.36f;
+                RefreshBladeClumpBed();
                 FactoryEvents.RaiseShovelLoadChanged(_currentSnowLoad, maxSnowCapacity);
-                hoveredFireplace.DepositSnow(deliveredCount);
+
+                SpawnThrowChunksToFireplace(hoveredFireplace, deliveredCount);
                 return;
             }
 
-            // Priority 2: If looking at a snow pile and shovel is not yet at max capacity, scoop and stack onto the blade!
+            // Priority 2: Scoop snow from the pile — carve wider crater and launch a chunk from hit.point onto the blade!
             if (hoveredPile != null && hoveredPile.HasSnow)
             {
                 if (_currentSnowLoad >= maxSnowCapacity)
                 {
                     FactoryEvents.RaiseStatusMessage(
-                        $"¡La pala ya está llena ({_currentSnowLoad}/{maxSnowCapacity})! Echa la nieve a la chimenea o pulsa [U] para ampliar capacidad.");
+                        $"¡La cuchara está llena ({_currentSnowLoad}/{maxSnowCapacity})! Lanza la nieve al fuego o pulsa [U] para ensanchar la pala.");
                     return;
                 }
 
-                if (hoveredPile.TryScoopAtPoint(hit.point))
+                float radiusMult = 1.0f + _bladeUpgradeLevel * 0.22f;
+                if (hoveredPile.TryScoopAtPoint(hit.point, radiusMult))
                 {
                     _currentSnowLoad++;
                     _swingAnimTimer = 0.30f;
-                    UpdateHeldSnowStackVisual();
                     FactoryEvents.RaiseShovelLoadChanged(_currentSnowLoad, maxSnowCapacity);
 
+                    SpawnScoopChunkFromPile(hit.point);
+
                     FactoryEvents.RaiseStatusMessage(
-                        $"Nieve apilada en la pala: {_currentSnowLoad}/{maxSnowCapacity} (Quedan {hoveredPile.RemainingScoops} en este montón)");
+                        $"Nieve recogida en la cuchara: {_currentSnowLoad}/{maxSnowCapacity} (Quedan {hoveredPile.RemainingScoops} en este montón)");
+                }
+            }
+        }
+
+        private void SpawnScoopChunkFromPile(Vector3 hitWorldPoint)
+        {
+            if (scoopHead == null)
+            {
+                RefreshBladeClumpBed();
+                return;
+            }
+
+            GameObject chunk = CreateFlyingSnowSphere(new Vector3(0.18f, 0.085f, 0.16f));
+            chunk.transform.position = hitWorldPoint + Vector3.up * 0.04f;
+
+            _flyingChunks.Add(new FlyingSnowChunk
+            {
+                ChunkTransform = chunk.transform,
+                FollowTarget = scoopHead,
+                StartWorldPos = chunk.transform.position,
+                EndWorldPos = scoopHead.position,
+                Elapsed = 0f,
+                Duration = 0.17f,
+                ArcHeight = 0.18f,
+                IsScoopInward = true
+            });
+        }
+
+        private void SpawnThrowChunksToFireplace(FireplaceHearth fireplace, int deliveredScoops)
+        {
+            Vector3 startPos = scoopHead != null ? scoopHead.position : transform.position + transform.forward * 0.6f;
+            Vector3 targetFireCenter = fireplace.transform.position + new Vector3(0f, 0.68f, 0f);
+
+            int visualChunkCount = Mathf.Clamp(deliveredScoops, 1, 6);
+            for (int i = 0; i < visualChunkCount; i++)
+            {
+                Vector3 jitter = new Vector3(
+                    Random.Range(-0.18f, 0.18f),
+                    Random.Range(-0.05f, 0.12f),
+                    Random.Range(-0.12f, 0.12f));
+
+                GameObject chunk = CreateFlyingSnowSphere(new Vector3(0.20f, 0.095f, 0.18f));
+                chunk.transform.position = startPos + jitter * 0.35f;
+
+                _flyingChunks.Add(new FlyingSnowChunk
+                {
+                    ChunkTransform = chunk.transform,
+                    FollowTarget = null,
+                    StartWorldPos = chunk.transform.position,
+                    EndWorldPos = targetFireCenter + jitter,
+                    Elapsed = -i * 0.035f, // slight stagger so multiple clumps fly in a natural burst
+                    Duration = 0.28f,
+                    ArcHeight = 0.38f + i * 0.04f,
+                    IsScoopInward = false,
+                    TargetFireplace = i == visualChunkCount - 1 ? fireplace : null,
+                    DeliveredScoopReward = deliveredScoops
+                });
+            }
+        }
+
+        private GameObject CreateFlyingSnowSphere(Vector3 scale)
+        {
+            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            go.name = "FlyingSnowClump";
+            go.transform.localScale = scale;
+            go.transform.rotation = Random.rotation;
+
+            Collider col = go.GetComponent<Collider>();
+            if (col != null) Destroy(col);
+
+            if (_snowMaterial != null)
+            {
+                MeshRenderer mr = go.GetComponent<MeshRenderer>();
+                if (mr != null) mr.sharedMaterial = _snowMaterial;
+            }
+            return go;
+        }
+
+        private void UpdateFlyingSnowChunks()
+        {
+            for (int i = _flyingChunks.Count - 1; i >= 0; i--)
+            {
+                FlyingSnowChunk item = _flyingChunks[i];
+                item.Elapsed += Time.deltaTime;
+
+                if (item.Elapsed < 0f)
+                {
+                    continue;
+                }
+
+                float t = Mathf.Clamp01(item.Elapsed / item.Duration);
+                Vector3 endPos = item.IsScoopInward && item.FollowTarget != null
+                    ? item.FollowTarget.TransformPoint(new Vector3(0f, 0.04f, 0.0f))
+                    : item.EndWorldPos;
+
+                Vector3 linearPos = Vector3.Lerp(item.StartWorldPos, endPos, t);
+                float parabola = 4f * t * (1f - t) * item.ArcHeight;
+                if (item.ChunkTransform != null)
+                {
+                    item.ChunkTransform.position = linearPos + Vector3.up * parabola;
+                }
+
+                if (t >= 1f)
+                {
+                    if (item.ChunkTransform != null)
+                    {
+                        Destroy(item.ChunkTransform.gameObject);
+                    }
+
+                    if (item.IsScoopInward)
+                    {
+                        RefreshBladeClumpBed();
+                    }
+                    else if (item.TargetFireplace != null)
+                    {
+                        item.TargetFireplace.DepositSnow(item.DeliveredScoopReward);
+                    }
+
+                    _flyingChunks.RemoveAt(i);
                 }
             }
         }
@@ -184,7 +395,7 @@ namespace SnowFactory.Gameplay
             Keyboard kb = Keyboard.current;
             if (kb == null) return;
 
-            // [U] Upgrade Shovel Capacity using Heat Coins
+            // [U] Option B: Wide-Blade Shovel Upgrade! Widens the physical metal ScoopHead and increases capacity
             if (kb.uKey.wasPressedThisFrame)
             {
                 if (_cachedHearth == null)
@@ -194,22 +405,25 @@ namespace SnowFactory.Gameplay
 
                 if (_cachedHearth != null && _cachedHearth.TrySpendHeatPoints(nextUpgradeCost))
                 {
+                    _bladeUpgradeLevel++;
                     maxSnowCapacity += upgradeCapacityStep;
                     nextUpgradeCost = Mathf.RoundToInt(nextUpgradeCost * 1.65f);
-                    UpdateHeldSnowStackVisual();
+
+                    ApplyWideBladeUpgradeVisual();
+                    RefreshBladeClumpBed();
                     FactoryEvents.RaiseShovelLoadChanged(_currentSnowLoad, maxSnowCapacity);
                     FactoryEvents.RaiseStatusMessage(
-                        $"¡Pala Mejorada! Ahora puedes apilar hasta {maxSnowCapacity} paladas de nieve a la vez.");
+                        $"¡Pala Ensanchada a Nivel {_bladeUpgradeLevel + 1}! Cuchara más ancha, cráteres mayores y capacidad para {maxSnowCapacity} paladas.");
                 }
                 else
                 {
                     int currentCoins = _cachedHearth != null ? _cachedHearth.HeatPoints : 0;
                     FactoryEvents.RaiseStatusMessage(
-                        $"Necesitas {nextUpgradeCost} Monedas de Calor para mejorar la pala (Tienes {currentCoins}). ¡Echa más nieve al fuego!");
+                        $"Necesitas {nextUpgradeCost} Monedas de Calor para ensanchar la pala (Tienes {currentCoins}). ¡Echa más nieve al fuego!");
                 }
             }
 
-            // [R] Call a fresh snowfall to refill all snow piles when the player wants more snow
+            // [R] Call a fresh snowfall to refill all snow piles
             if (kb.rKey.wasPressedThisFrame)
             {
                 SnowPile[] piles = Object.FindObjectsByType<SnowPile>(FindObjectsSortMode.None);
@@ -221,42 +435,49 @@ namespace SnowFactory.Gameplay
             }
         }
 
-        /// <summary>
-        /// Visually grows the snow mound sitting on the shovel blade as more scoops are stacked.
-        /// </summary>
-        private void UpdateHeldSnowStackVisual()
+        private void ApplyWideBladeUpgradeVisual()
         {
-            if (heldSnowVisual == null) return;
+            if (scoopHead == null) return;
+
+            // Widen the physical metal scoop blade horizontally (+16% width per upgrade, up to 1.85x) and slightly deeper
+            float widthFactor = Mathf.Min(1.0f + _bladeUpgradeLevel * 0.16f, 1.85f);
+            float lengthFactor = Mathf.Min(1.0f + _bladeUpgradeLevel * 0.06f, 1.30f);
+
+            scoopHead.localScale = new Vector3(
+                _baseScoopHeadScale.x * widthFactor,
+                _baseScoopHeadScale.y,
+                _baseScoopHeadScale.z * lengthFactor
+            );
+        }
+
+        /// <summary>
+        /// Activates low-profile snow clumps across the concave shovel pan according to fill ratio.
+        /// Never stretches vertically into a giant egg!
+        /// </summary>
+        private void RefreshBladeClumpBed()
+        {
+            if (_bladeClumpVisuals.Count == 0) return;
 
             if (_currentSnowLoad <= 0)
             {
-                heldSnowVisual.SetActive(false);
+                for (int i = 0; i < _bladeClumpVisuals.Count; i++)
+                {
+                    _bladeClumpVisuals[i].gameObject.SetActive(false);
+                }
                 return;
             }
 
-            heldSnowVisual.SetActive(true);
+            float fillRatio = Mathf.Clamp01((float)_currentSnowLoad / Mathf.Max(1, maxSnowCapacity));
+            int activeClumps = Mathf.Clamp(
+                Mathf.CeilToInt(fillRatio * _bladeClumpVisuals.Count),
+                1,
+                _bladeClumpVisuals.Count);
 
-            // Grow width slightly and height substantially with each stacked scoop so the player sees a big mound forming on the blade
-            int extraScoops = _currentSnowLoad - 1;
-            float widthMult = 1.0f + Mathf.Min(extraScoops * 0.12f, 0.65f);
-            float heightMult = 1.0f + extraScoops * 0.48f;
-            float lengthMult = 1.0f + Mathf.Min(extraScoops * 0.10f, 0.55f);
-
-            Vector3 newScale = new Vector3(
-                _baseSnowLocalScale.x * widthMult,
-                _baseSnowLocalScale.y * heightMult,
-                _baseSnowLocalScale.z * lengthMult
-            );
-
-            heldSnowVisual.transform.localScale = newScale;
-
-            // Shift upward as height grows so the bottom of the snow mound stays planted inside the shovel pan
-            float extraHeightOffset = (newScale.y - _baseSnowLocalScale.y) * 0.42f;
-            heldSnowVisual.transform.localPosition = new Vector3(
-                _baseSnowLocalPos.x,
-                _baseSnowLocalPos.y + extraHeightOffset,
-                _baseSnowLocalPos.z
-            );
+            for (int i = 0; i < _bladeClumpVisuals.Count; i++)
+            {
+                bool shouldShow = i < activeClumps;
+                _bladeClumpVisuals[i].gameObject.SetActive(shouldShow);
+            }
         }
 
         private void AnimateShovelSwing()
@@ -266,15 +487,15 @@ namespace SnowFactory.Gameplay
             if (_swingAnimTimer > 0f)
             {
                 _swingAnimTimer -= Time.deltaTime;
-                float t = Mathf.Sin((1f - (_swingAnimTimer / 0.32f)) * Mathf.PI);
-                shovelPivot.localPosition = _restLocalPosition + new Vector3(0f, -0.08f * t, 0.18f * t);
-                shovelPivot.localRotation = _restLocalRotation * Quaternion.Euler(26f * t, -6f * t, 0f);
+                float t = Mathf.Sin((1f - (_swingAnimTimer / 0.34f)) * Mathf.PI);
+                shovelPivot.localPosition = _restLocalPosition + new Vector3(0f, -0.07f * t, 0.20f * t);
+                shovelPivot.localRotation = _restLocalRotation * Quaternion.Euler(24f * t, -6f * t, 0f);
             }
             else
             {
                 float bob = Mathf.Sin(Time.time * 2.4f) * 0.008f;
-                // Slight weight sag when carrying a heavy stack of snow
-                float weightDip = _currentSnowLoad * 0.006f;
+                float fillRatio = Mathf.Clamp01((float)_currentSnowLoad / Mathf.Max(1, maxSnowCapacity));
+                float weightDip = fillRatio * 0.022f;
                 shovelPivot.localPosition = _restLocalPosition + new Vector3(0f, bob - weightDip, 0f);
                 shovelPivot.localRotation = _restLocalRotation;
             }

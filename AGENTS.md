@@ -127,9 +127,12 @@ El Unity Hub del usuario se ejecuta como paquete MSIX (`WindowsApps`), por lo qu
   - Incorporación de nevada ambiental suave (`AmbientSnowfallParticles`) en el patio.
 - **Bucle Incremental: Capacidad Acumulable en la Pala + Monedas de Calor y Mejoras**:
   - `ShovelController.cs` (`Assets/_Project/Scripts/Gameplay/ShovelController.cs`):
-    - Capacidad inicial de `3` paladas acumulables (`maxSnowCapacity`). Con cada palada recogida (`_currentSnowLoad`), el bloque de nieve sobre la hoja (`HeldSnowVisual`) crece visualmente en altura y anchura (`UpdateHeldSnowStackVisual`) y la pala añade un ligero peso físico al caminar.
-    - Al apuntar a la chimenea y pulsar `Clic Izquierdo` o `E`, se arrojan todas las paladas acumuladas de golpe.
-    - Atajo `[U]` para comprar mejoras de capacidad (`+2` de capacidad por nivel usando Monedas de Calor) y `[R]` para invocar una nueva nevada que regenera al 100% los ventisqueros (`SnowPile.RefillPile()`).
+    - Capacidad inicial de `3` paladas acumulables (`maxSnowCapacity`).
+    - **Opción A (Llenado Orgánico de la Cuchara + Vuelo Parabólico)**: En lugar de estirar una esfera hacia arriba (que a niveles altos parecía un huevo gigante), la cuchara (`ScoopHead`) contiene una cama de 9 grumos orgánicos de bajo perfil (`ClumpBedRoot`) que van llenando el interior cóncavo de la hoja de atrás hacia adelante y de lado a lado. Además, al excavar, un trozo de nieve (`FlyingSnowClump`) salta físicamente en parábola desde el punto de impacto (`hit.point`) hasta el interior de la pala; y al arrojar a la chimenea, las pellas de nieve vuelan en arco desde la pala hasta caer dentro del fuego.
+    - **Opción B (Mejora de Pala Ancha con `[U]`)**: Al mejorar la pala con `[U]`, la cuchara metálica (`ScoopHead`) **se ensancha físicamente** (`ApplyWideBladeUpgradeVisual`) y excava cráteres de mayor radio (`radiusMultiplier`) en los montones de nieve.
+    - Atajo `[R]` para invocar una nueva nevada que regenera al 100% los ventisqueros (`SnowPile.RefillPile()`).
+  - `PremiumSnowURP.shader` (`Assets/_Project/Materials/PremiumSnowURP.shader`):
+    - Corrección de los destellos de cristal para usar puntos circulares con caída radial (`length(cellLocal - glintOffset)`) dentro de cada celda 3D, eliminando por completo los artefactos de cuadraditos planos cuando la nieve está cerca de la cámara.
   - `FireplaceHearth.cs` (`Assets/_Project/Scripts/Gameplay/FireplaceHearth.cs`):
     - Convierte las paladas fundidas en **Monedas de Calor** (`10` monedas base por palada + **Bonus de Pila** progresivo cuando entregas varias paladas acumuladas de una sola vez).
   - `FactoryHudController.cs` (`Assets/_Project/Scripts/UI/FactoryHudController.cs`):
