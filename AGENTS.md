@@ -116,3 +116,12 @@ El Unity Hub del usuario se ejecuta como paquete MSIX (`WindowsApps`), por lo qu
     - `FireplaceHearth.cs` (`Assets/_Project/Scripts/Gameplay/FireplaceHearth.cs`): Chimenea de ladrillo y piedra con brasas emisivas (`M_FireEmber`), llamas animadas (`FlameCore` con `M_FireFlame`), luz puntual cálida parpadeante (`FirePointLight`) y partículas de vapor (`SteamBurstParticles`) al arrojar nieve al fuego.
 - **Refinamiento Visual de la Pala en Primera Persona (`ScoopHead`)**:
   - Se rediseñó la geometría y orientación de la pala equipada (`Player/CameraRoot/ShovelPivot/ScoopHead`) para eliminar la ilusión óptica en primera persona donde la pared trasera tapaba el interior de la hoja: ahora la cuchara cóncava (`BladePanRear` + `BladePanFront`), sus paredes laterales acampanadas y el filo metálico delantero (`BladeCuttingEdge`) están orientados hacia arriba y claramente visibles desde el ángulo de la cámara.
+- **Identidad Visual Propia "Premium Alpine Snow" (`PremiumSnowURP.shader` + Deformación Orgánica por Vértices)**:
+  - Creación de `PremiumSnowURP.shader` (`Assets/_Project/Materials/PremiumSnowURP.shader`) en HLSL nativo para URP:
+    - **Subsurface Scattering (SSS) y Rampa Glaciar**: Transición suave de 3 paradas entre sombra azul glaciar profunda, tono alpino medio y cresta iluminada por el sol, además de recibir el resplandor cálido anaranjado de la chimenea cercana.
+    - **Micro-destellos de cristal (*View-Dependent Sparkles*)**: Celdas cristalinas procedurales 3D en espacio de mundo moduladas por el vector de vista (`ViewDir`) y dirección de luz, generando destellos vivos al mover la cámara (inspirado en *Journey* y *Horizon Zero Dawn: The Frozen Wilds*).
+    - **Micro-relieve procedural FBM**: Perturbación de normales por diferencias finitas para simular nieve en polvo y dunas barridas por el viento sin costuras de UV.
+  - Evolución de `SnowPile.cs` (`Assets/_Project/Scripts/Gameplay/SnowPile.cs`):
+    - Generación procedural de mallas orgánicas de ventisqueros (`BuildOrganicSnowDriftMesh`) con falda ondulada y perfil acolchado natural en lugar de esferas primitivas.
+    - **Excavación localizada real por vértices (`CarveCraterAtWorldPoint`)**: Cada palada hunde un cráter real en el punto exacto de impacto (`hit.point`), sombrea el interior de la cavidad excavada con oclusión azul glaciar en el color de vértice (`vertexCol.r`), actualiza el `MeshCollider` y dispara una bocanada de polvo de nieve (`SnowScoopBurstParticles`).
+  - Incorporación de nevada ambiental suave (`AmbientSnowfallParticles`) en el patio.

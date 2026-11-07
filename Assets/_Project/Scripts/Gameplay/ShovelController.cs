@@ -107,7 +107,7 @@ namespace SnowFactory.Gameplay
 
             if (!_hasSnowLoaded && hoveredPile != null && hoveredPile.HasSnow)
             {
-                if (hoveredPile.TryScoop())
+                if (hoveredPile.TryScoopAtPoint(hit.point))
                 {
                     _hasSnowLoaded = true;
                     _swingAnimTimer = 0.32f;
