@@ -1,31 +1,24 @@
 using System;
-using UnityEngine;
 
 namespace SnowFactory.Core
 {
     /// <summary>
-    /// Lightweight static event bus for decoupled communication between Managers, Gameplay, and UI.
+    /// Lightweight static event bus for decoupled communication between Shovel gameplay and UI.
     /// </summary>
     public static class FactoryEvents
     {
-        public static event Action<int> OnCreditsChanged;
-        public static event Action<bool> OnBuildModeChanged;
-        public static event Action<int, string, int> OnSelectedMachineChanged;
+        public static event Action<int> OnSnowBurnedCountChanged;
+        public static event Action<string> OnPromptChanged;
         public static event Action<string> OnStatusMessage;
 
-        public static void RaiseCreditsChanged(int currentCredits)
+        public static void RaiseSnowBurnedCountChanged(int totalBurned)
         {
-            OnCreditsChanged?.Invoke(currentCredits);
+            OnSnowBurnedCountChanged?.Invoke(totalBurned);
         }
 
-        public static void RaiseBuildModeChanged(bool isBuildMode)
+        public static void RaisePromptChanged(string prompt)
         {
-            OnBuildModeChanged?.Invoke(isBuildMode);
-        }
-
-        public static void RaiseSelectedMachineChanged(int slotIndex, string machineName, int cost)
-        {
-            OnSelectedMachineChanged?.Invoke(slotIndex, machineName, cost);
+            OnPromptChanged?.Invoke(prompt);
         }
 
         public static void RaiseStatusMessage(string message)

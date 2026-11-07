@@ -26,6 +26,7 @@ namespace SnowFactory.Gameplay
         private CharacterController _controller;
         private float _verticalVelocity;
         private float _cameraPitch;
+        private int _ignoreMouseFrames = 5;
 
         public Transform CameraRoot => cameraRoot;
         public bool IsGrounded => _controller != null && _controller.isGrounded;
@@ -87,13 +88,21 @@ namespace SnowFactory.Gameplay
             if (cameraRoot == null) return;
 
             Mouse mouse = Mouse.current;
-            if (mouse != null && Cursor.lockState == CursorLockMode.Locked)
+            if (mouse != null && Cursor.lockState == CursorLockMode.Locked && Application.isFocused)
             {
-                Vector2 lookDelta = mouse.delta.ReadValue() * mouseSensitivity;
+                if (_ignoreMouseFrames > 0)
+                {
+                    _ignoreMouseFrames--;
+                    return;
+                }
 
-                _cameraPitch = Mathf.Clamp(_cameraPitch - lookDelta.y, -maxPitchAngle, maxPitchAngle);
-                cameraRoot.localRotation = Quaternion.Euler(_cameraPitch, 0f, 0f);
-                transform.Rotate(Vector3.up * lookDelta.x);
+                Vector2 lookDelta = mouse.delta.ReadValue() * mouseSensitivity;
+                if (lookDelta.sqrMagnitude < 400f)
+                {
+                    _cameraPitch = Mathf.Clamp(_cameraPitch - lookDelta.y, -maxPitchAngle, maxPitchAngle);
+                    cameraRoot.localRotation = Quaternion.Euler(_cameraPitch, 0f, 0f);
+                    transform.Rotate(Vector3.up * lookDelta.x);
+                }
             }
         }
 

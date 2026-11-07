@@ -34,33 +34,31 @@ El Unity Hub del usuario se ejecuta como paquete MSIX (`WindowsApps`), por lo qu
 
 ## 2. Arquitectura y Diseño Técnico de *Snow Factory*
 
-### Concepto y Core Loop
-- **Género**: Automatización y gestión de fábrica en **Primera Persona 3D**.
+### Concepto y Core Loop Actual (Base Jugable: Pala + Montones de Nieve + Chimenea con Fuego)
+- **Perspectiva**: **Primera Persona 3D** con herramienta equipada en mano (`ShovelPivot` bajo `Player/CameraRoot`).
 - **Bucle Principal**:
-  1. **Extracción / Recolección**: Obtención de nieve virgen (manual o mediante Extractores de Nieve).
-  2. **Transporte Logístico**: Movimiento físico de recursos sobre **Cintas Transportadoras (Conveyors)** conectadas en cuadrícula (`Grid`).
-  3. **Procesamiento en Máquinas**: Transformación de nieve suelta en bloques compactos/hielo industrial (`SnowCompactor`, etc.).
-  4. **Entrega y Economía**: Recepción en muelle de venta (`DeliveryHub`) para generar créditos (`SnowCredits`) y construir/expandir la fábrica.
+  1. **Recolección Gradual con Pala**: El jugador lleva equipada una pala 3D (`ShovelController`) y al acercarse a los montones de nieve (`SnowDepositMound_Main` y `SnowDepositMound_Sub`, con componente `SnowPile`) recoge nieve palada a palada (`Clic Izquierdo` o `E`).
+  2. **Deformación / Reducción Visual del Montón**: Cada palada reduce gradualmente la escala (`localScale`) y altura del montón de nieve (`SnowPile.TryScoop()`) hasta agotarlo, mostrando un bloque de nieve cargado sobre la hoja de la pala (`HeldSnowVisual`).
+  3. **Depósito en la Chimenea con Fuego**: El jugador lleva la pala cargada hasta la chimenea encendida (`FireplaceHearth`) y arroja la nieve al fuego (`Clic Izquierdo` o `E`), provocando un destello del fuego, una bocanada de vapor (`SteamBurstParticles`) e incrementando el contador de paladas en el HUD (`FactoryHudController`).
 
 ### Perspectiva y Controles
-- **Primera Persona 3D**: `CharacterController` + `InputSystem` (`WASD`, salto, sprint, vista ratón con `CinemachineCamera`).
-- **Interacción y Construcción en Grid**:
-  - Raycast central para interactuar con máquinas/recursos.
-  - Modo Construcción (`Build Mode`) con previsualización holográfica ajustada al Grid (`Ghost Preview`), rotación de 90° (`R`), validación de posición/coste y colocación/demolición.
+- **Primera Persona 3D**: `CharacterController` + `InputSystem` (`WASD`, salto `Space`, sprint `LeftShift`, vista ratón con `CinemachineCamera`, `Esc` para bloquear/liberar cursor).
+- **Interacción con Pala Equipada**:
+  - `Clic Izquierdo` o `E` apuntando a un `SnowPile` (con la pala vacía): recoge una palada de nieve y encoge el montón.
+  - `Clic Izquierdo` o `E` apuntando a `FireplaceHearth` (con la pala cargada): arroja la nieve al fuego de la chimenea.
 
 ### Stack y Paquetes Base
 - `com.unity.render-pipelines.universal` (`17.3.0`)
 - `com.unity.inputsystem` (`1.20.1`)
 - `com.unity.cinemachine` (`3.1.7`)
 - `com.unity.ai.navigation` (`2.0.16`)
-- `com.unity.ugui` (`2.0.0` - Canvas + TextMeshPro)
+- `com.unity.ugui` (`2.0.0` - Canvas + UI)
 - `com.unity.pipeline` (`0.10.0-exp.1`)
 
 ### Estructura Modular (`Assets/_Project/`)
-- `Assets/_Project/Scripts/Core/` — Interfaces base (`IInteractable`, `ITickable`), bus de eventos desacoplado, bootstrap.
-- `Assets/_Project/Scripts/Managers/` — `GridManager`, `BuildManager`, `EconomyManager`.
-- `Assets/_Project/Scripts/Gameplay/` — `FirstPersonController`, `PlayerInteractor`, máquinas (`SnowExtractor`, `ConveyorBelt`, `SnowCompactor`, `DeliveryHub`), datos (`ScriptableObjects`).
-- `Assets/_Project/Scripts/UI/` — HUD en uGUI/TextMeshPro, hotbar de construcción, retícula contextual.
+- `Assets/_Project/Scripts/Core/` — `Palette.cs` (colores base y emisivos del entorno, pala y chimenea), `FactoryEvents.cs` (eventos desacoplados del HUD).
+- `Assets/_Project/Scripts/Gameplay/` — `FirstPersonController.cs`, `ShovelController.cs`, `SnowPile.cs`, `FireplaceHearth.cs`.
+- `Assets/_Project/Scripts/UI/` — `FactoryHudController.cs` (contador de paladas en la chimenea y avisos contextuales en pantalla).
 - `Assets/_Project/Scenes/` — `Boot.unity`, `MainGame.unity`, `TestSandbox.unity`.
 - `Assets/_Project/Prefabs/`, `Materials/`, `Audio/`, `Settings/`.
 
@@ -109,4 +107,10 @@ El Unity Hub del usuario se ejecuta como paquete MSIX (`WindowsApps`), por lo qu
     - `FactoryHudController.cs` (`Assets/_Project/Scripts/UI/`): HUD minimalista con contador de créditos, máquina seleccionada y barra inferior de atajos.
   - Línea de producción inicial (`StarterFactoryLine`) pre-instalada en el centro de la planta para que el bucle económico funcione desde el segundo 1 en PlayMode.
   - *Aprendizaje clave 6*: En Unity 6, `Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")` es la fuente built-in válida para `UnityEngine.UI.Text` (en lugar de `Arial.ttf`, que lanza excepción en versiones recientes).
-  - *Aprendizaje clave 7*: En `FirstPersonController`, inicializar `_cameraPitch` en `Awake()` (ej. `initialPitchAngle = 14f`) evita que el primer frame de `Update()` sobrescriba a `0°` la inclinación vertical configurada en la escena cuando la ventana del Editor no tiene el cursor bloqueado.
+  - *Aprendizaje clave 7*: En `FirstPersonController`, inicializar `_cameraPitch` en `Awake()` (ej. `initialPitchAngle = 14f`) e ignorar los primeros frames de salto de delta del ratón (`_ignoreMouseFrames`) cuando `Cursor.lockState == CursorLockMode.Locked` evita que el re-centrado inicial del cursor de Windows gire bruscamente la cámara hacia el cielo al entrar en PlayMode.
+- **Pivote de Diseño — Eliminación de Máquinas/Modo Construcción e Implementación de Pala + Montón de Nieve + Chimenea con Fuego**:
+  - A petición del usuario, se eliminaron por completo las máquinas industriales, el sistema de cuadrícula y el modo construcción (`StarterFactoryLine`, `FactoryManagers`, `BuildManager`, `GridManager`, `EconomyManager`, `PlacedMachine`, `BuildableMachineSO`, prefabs `PF_*` y assets `SO_*`).
+  - Se implementó el bucle en primera persona centrado en:
+    - `SnowPile.cs` (`Assets/_Project/Scripts/Gameplay/SnowPile.cs`): Asociado a `SnowDepositMound_Main` (`12` paladas) y `SnowDepositMound_Sub` (`8` paladas). Reduce gradualmente la escala y altura del montón con cada palada hasta agotarse.
+    - `ShovelController.cs` (`Assets/_Project/Scripts/Gameplay/ShovelController.cs`): Pala 3D equipada en primera persona (`Player/CameraRoot/ShovelPivot`) con animación procedural de palada/lanzamiento y nieve visible sobre la hoja (`HeldSnowVisual`).
+    - `FireplaceHearth.cs` (`Assets/_Project/Scripts/Gameplay/FireplaceHearth.cs`): Chimenea de ladrillo y piedra con brasas emisivas (`M_FireEmber`), llamas animadas (`FlameCore` con `M_FireFlame`), luz puntual cálida parpadeante (`FirePointLight`) y partículas de vapor (`SteamBurstParticles`) al arrojar nieve al fuego.
