@@ -192,6 +192,18 @@ namespace SnowFactory.Gameplay
             return TryScoopAtPoint(transform.position + Vector3.up * 0.4f);
         }
 
+        public void RefillPile()
+        {
+            _remainingScoops = maxScoops;
+            transform.localScale = _initialScale;
+            transform.localPosition = _initialPosition;
+
+            if (_renderer != null) _renderer.enabled = true;
+            if (_collider != null) _collider.enabled = true;
+
+            BuildOrganicSnowDriftMesh();
+        }
+
         public bool TryScoopAtPoint(Vector3 worldHitPoint)
         {
             if (_remainingScoops <= 0)

@@ -5,7 +5,8 @@ using SnowFactory.Core;
 namespace SnowFactory.UI
 {
     /// <summary>
-    /// Simple HUD showing how many snow scoops have been thrown into the fireplace and interaction prompts.
+    /// HUD displaying Heat Coins earned from melting snow, current stack load on the shovel,
+    /// total scoops burned, and contextual interaction prompts.
     /// </summary>
     public class FactoryHudController : MonoBehaviour
     {
@@ -13,11 +14,17 @@ namespace SnowFactory.UI
         [SerializeField] private Text promptText;
         [SerializeField] private Text statusText;
 
+        private int _burnedScoops;
+        private int _heatPoints;
+        private int _currentLoad;
+        private int _maxCapacity = 3;
         private float _statusClearTimer;
 
         private void OnEnable()
         {
             FactoryEvents.OnSnowBurnedCountChanged += HandleSnowBurnedChanged;
+            FactoryEvents.OnHeatPointsChanged += HandleHeatPointsChanged;
+            FactoryEvents.OnShovelLoadChanged += HandleShovelLoadChanged;
             FactoryEvents.OnPromptChanged += HandlePromptChanged;
             FactoryEvents.OnStatusMessage += HandleStatusMessage;
         }
@@ -25,6 +32,8 @@ namespace SnowFactory.UI
         private void OnDisable()
         {
             FactoryEvents.OnSnowBurnedCountChanged -= HandleSnowBurnedChanged;
+            FactoryEvents.OnHeatPointsChanged -= HandleHeatPointsChanged;
+            FactoryEvents.OnShovelLoadChanged -= HandleShovelLoadChanged;
             FactoryEvents.OnPromptChanged -= HandlePromptChanged;
             FactoryEvents.OnStatusMessage -= HandleStatusMessage;
         }
@@ -36,7 +45,7 @@ namespace SnowFactory.UI
                 _statusClearTimer -= Time.deltaTime;
                 if (_statusClearTimer <= 0f && statusText != null)
                 {
-                    statusText.text = "[WASD] Moverse | [Clic Izq / E] Usar Pala (Recoger Nieve / Echar a la Chimenea)";
+                    statusText.text = "[Clic Izq / E] Apilar Nieve / Echar al Fuego   |   [U] Mejorar Pala   |   [R] Nueva Nevada";
                 }
             }
         }
@@ -46,13 +55,33 @@ namespace SnowFactory.UI
             counterText = counter;
             promptText = prompt;
             statusText = status;
+            RefreshHeaderText();
         }
 
         private void HandleSnowBurnedChanged(int count)
         {
+            _burnedScoops = count;
+            RefreshHeaderText();
+        }
+
+        private void HandleHeatPointsChanged(int points)
+        {
+            _heatPoints = points;
+            RefreshHeaderText();
+        }
+
+        private void HandleShovelLoadChanged(int currentLoad, int maxCapacity)
+        {
+            _currentLoad = currentLoad;
+            _maxCapacity = maxCapacity;
+            RefreshHeaderText();
+        }
+
+        private void RefreshHeaderText()
+        {
             if (counterText != null)
             {
-                counterText.text = $"NIEVE EN LA CHIMENEA: {count} PALADAS";
+                counterText.text = $"MONEDAS DE CALOR: {_heatPoints}   |   PALA: {_currentLoad}/{_maxCapacity}   |   FUNDIDAS: {_burnedScoops}";
             }
         }
 
@@ -69,7 +98,7 @@ namespace SnowFactory.UI
             if (statusText != null)
             {
                 statusText.text = message;
-                _statusClearTimer = 3.0f;
+                _statusClearTimer = 3.5f;
             }
         }
     }

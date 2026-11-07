@@ -5,7 +5,8 @@ namespace SnowFactory.Gameplay
 {
     /// <summary>
     /// Represents a fireplace with an active fire where shoveled snow can be thrown/deposited.
-    /// Pulses fire light and reacts with a flare/steam burst when snow is thrown into it.
+    /// Converts melted snow into Heat Coins / Points, with multi-scoop batch bonuses,
+    /// and allows spending coins to upgrade the shovel's capacity.
     /// </summary>
     public class FireplaceHearth : MonoBehaviour
     {
@@ -18,11 +19,18 @@ namespace SnowFactory.Gameplay
         [SerializeField] private float baseLightIntensity = 4.5f;
         [SerializeField] private float flickerSpeed = 8f;
 
+        [Header("Economy & Rewards")]
+        [SerializeField] private int basePointsPerScoop = 10;
+        [SerializeField] private int multiScoopBonusPerExtra = 5;
+
         private int _totalSnowDeposited;
+        private int _heatPoints;
         private float _reactionTimer;
+        private float _reactionScaleBoost;
         private Vector3 _baseFlameScale = Vector3.one;
 
         public int TotalSnowDeposited => _totalSnowDeposited;
+        public int HeatPoints => _heatPoints;
 
         private void Awake()
         {
@@ -30,6 +38,12 @@ namespace SnowFactory.Gameplay
             {
                 _baseFlameScale = flameCore.localScale;
             }
+        }
+
+        private void Start()
+        {
+            FactoryEvents.RaiseSnowBurnedCountChanged(_totalSnowDeposited);
+            FactoryEvents.RaiseHeatPointsChanged(_heatPoints);
         }
 
         public void BindReferences(Light lightSource, Transform flameTransform, ParticleSystem steamFx)
@@ -46,7 +60,7 @@ namespace SnowFactory.Gameplay
         private void Update()
         {
             float noise = Mathf.PerlinNoise(Time.time * flickerSpeed, 0.5f);
-            float reactionBoost = _reactionTimer > 0f ? 2.5f : 0f;
+            float reactionBoost = _reactionTimer > 0f ? (2.0f + _reactionScaleBoost * 1.5f) : 0f;
 
             if (_reactionTimer > 0f)
             {
@@ -60,7 +74,7 @@ namespace SnowFactory.Gameplay
 
             if (flameCore != null)
             {
-                float pulse = 1f + (noise - 0.5f) * 0.22f + (_reactionTimer > 0f ? 0.35f : 0f);
+                float pulse = 1f + (noise - 0.5f) * 0.22f + (_reactionTimer > 0f ? (0.25f + _reactionScaleBoost * 0.15f) : 0f);
                 flameCore.localScale = new Vector3(
                     _baseFlameScale.x * pulse,
                     _baseFlameScale.y * (pulse * 1.1f),
@@ -69,10 +83,24 @@ namespace SnowFactory.Gameplay
             }
         }
 
-        public void DepositSnow()
+        /// <summary>
+        /// Deposits one or multiple accumulated scoops of snow at once into the fireplace.
+        /// Grants base coins + batch bonus when delivering multiple scoops together.
+        /// </summary>
+        public int DepositSnow(int scoopCount = 1)
         {
-            _totalSnowDeposited++;
-            _reactionTimer = 0.45f;
+            int count = Mathf.Max(1, scoopCount);
+            _totalSnowDeposited += count;
+
+            // Calculate reward: 10 pts per scoop + bonus for stacking multiple scoops at once
+            int baseEarned = count * basePointsPerScoop;
+            int batchBonus = count > 1 ? (count - 1) * count * multiScoopBonusPerExtra / 2 : 0;
+            int totalEarned = baseEarned + batchBonus;
+
+            _heatPoints += totalEarned;
+
+            _reactionTimer = Mathf.Clamp(0.45f + count * 0.12f, 0.45f, 1.4f);
+            _reactionScaleBoost = Mathf.Clamp(count * 0.35f, 0.35f, 2.2f);
 
             if (steamBurstParticles != null)
             {
@@ -80,7 +108,32 @@ namespace SnowFactory.Gameplay
             }
 
             FactoryEvents.RaiseSnowBurnedCountChanged(_totalSnowDeposited);
-            FactoryEvents.RaiseStatusMessage($"¡Nieve arrojada al fuego de la chimenea! (Total: {_totalSnowDeposited})");
+            FactoryEvents.RaiseHeatPointsChanged(_heatPoints);
+
+            if (batchBonus > 0)
+            {
+                FactoryEvents.RaiseStatusMessage(
+                    $"¡+{totalEarned} Monedas de Calor! ({count} paladas fundidas de golpe, incluye +{batchBonus} Bonus de Pila)");
+            }
+            else
+            {
+                FactoryEvents.RaiseStatusMessage(
+                    $"¡+{totalEarned} Monedas de Calor! (1 palada fundida en la chimenea)");
+            }
+
+            return totalEarned;
+        }
+
+        public bool TrySpendHeatPoints(int amount)
+        {
+            if (_heatPoints < amount)
+            {
+                return false;
+            }
+
+            _heatPoints -= amount;
+            FactoryEvents.RaiseHeatPointsChanged(_heatPoints);
+            return true;
         }
     }
 }

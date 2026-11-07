@@ -125,3 +125,12 @@ El Unity Hub del usuario se ejecuta como paquete MSIX (`WindowsApps`), por lo qu
     - Generación procedural de mallas orgánicas de ventisqueros (`BuildOrganicSnowDriftMesh`) con falda ondulada y perfil acolchado natural en lugar de esferas primitivas.
     - **Excavación localizada real por vértices (`CarveCraterAtWorldPoint`)**: Cada palada hunde un cráter real en el punto exacto de impacto (`hit.point`), sombrea el interior de la cavidad excavada con oclusión azul glaciar en el color de vértice (`vertexCol.r`), actualiza el `MeshCollider` y dispara una bocanada de polvo de nieve (`SnowScoopBurstParticles`).
   - Incorporación de nevada ambiental suave (`AmbientSnowfallParticles`) en el patio.
+- **Bucle Incremental: Capacidad Acumulable en la Pala + Monedas de Calor y Mejoras**:
+  - `ShovelController.cs` (`Assets/_Project/Scripts/Gameplay/ShovelController.cs`):
+    - Capacidad inicial de `3` paladas acumulables (`maxSnowCapacity`). Con cada palada recogida (`_currentSnowLoad`), el bloque de nieve sobre la hoja (`HeldSnowVisual`) crece visualmente en altura y anchura (`UpdateHeldSnowStackVisual`) y la pala añade un ligero peso físico al caminar.
+    - Al apuntar a la chimenea y pulsar `Clic Izquierdo` o `E`, se arrojan todas las paladas acumuladas de golpe.
+    - Atajo `[U]` para comprar mejoras de capacidad (`+2` de capacidad por nivel usando Monedas de Calor) y `[R]` para invocar una nueva nevada que regenera al 100% los ventisqueros (`SnowPile.RefillPile()`).
+  - `FireplaceHearth.cs` (`Assets/_Project/Scripts/Gameplay/FireplaceHearth.cs`):
+    - Convierte las paladas fundidas en **Monedas de Calor** (`10` monedas base por palada + **Bonus de Pila** progresivo cuando entregas varias paladas acumuladas de una sola vez).
+  - `FactoryHudController.cs` (`Assets/_Project/Scripts/UI/FactoryHudController.cs`):
+    - Muestra en tiempo real `MONEDAS DE CALOR: X | PALA: carga/capacidad | FUNDIDAS: total`.
