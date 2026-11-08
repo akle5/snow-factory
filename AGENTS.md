@@ -137,6 +137,7 @@ El Unity Hub del usuario se ejecuta como paquete MSIX (`WindowsApps`), por lo qu
     - Convierte las paladas fundidas en **Monedas de Calor** (`10` monedas base por palada + **Bonus de Pila** progresivo cuando entregas varias paladas acumuladas de una sola vez).
   - `FactoryHudController.cs` (`Assets/_Project/Scripts/UI/FactoryHudController.cs`):
     - Muestra en tiempo real `MONEDAS DE CALOR: X | PALA: carga/capacidad | FUNDIDAS: total`.
-- **Importación Directa de Modelos glTF de Sketchfab (`Low Poly Snow Island`)**:
+- **Importación Directa de Modelos glTF de Sketchfab (`Low Poly Snow Island`) y Excavación en Terrenos 3D Importados**:
   - Se extrajo `low_poly_snow_island.zip` en `Assets/_Project/Models/LowPolySnowIsland/` y se convirtieron sus buffers binarios (`scene.gltf` + `scene.bin`) a assets nativos `Mesh` de Unity (`SnowIsland_TerrainMesh.asset` con `10.396` vértices facetados y `SnowIsland_CaveMesh.asset` con `2.362` vértices) sin requerir paquetes externos.
-  - Se colocó el objeto `Sketchfab_LowPolySnowIsland` con `MeshCollider` en el lateral derecho del patio (`(32.5, 3.6, 14.0)`) para evaluar su estética Low-Poly facetada dentro del juego y caminar sobre él.
+  - Se colocó el objeto `Sketchfab_LowPolySnowIsland` con `MeshCollider` en el lateral derecho del patio (`(32.5, 3.6, 14.0)`).
+  - Se amplió `SnowPile.cs` con el modo **`useExistingMesh` (`ConfigureCustomMeshTerrain`)** y cálculo de normales facetadas por triángulo (`RecalculateFlatNormals`): ahora cualquier terreno o modelo 3D importado de Sketchfab se puede excavar con la pala en coordenadas de mundo, hundiendo las caras low-poly en el punto exacto donde clavas la pala, manteniendo su estética facetada ("flat shading") intacta y regenerándose al pulsar `[R]`.

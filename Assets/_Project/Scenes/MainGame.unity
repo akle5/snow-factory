@@ -6461,6 +6461,10 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::SnowFactory.Gameplay.SnowPile
   maxScoops: 8
   minScaleRatio: 0.2
+  useExistingMesh: 0
+  sourceCustomMesh: {fileID: 0}
+  preserveLowPolyFlatShading: 1
+  shrinkOverallScaleOnScoop: 1
   radialSegments: 40
   ringSegments: 18
   driftRidgeStrength: 0.22
@@ -14508,6 +14512,10 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::SnowFactory.Gameplay.SnowPile
   maxScoops: 5
   minScaleRatio: 0.28
+  useExistingMesh: 0
+  sourceCustomMesh: {fileID: 0}
+  preserveLowPolyFlatShading: 1
+  shrinkOverallScaleOnScoop: 1
   radialSegments: 40
   ringSegments: 18
   driftRidgeStrength: 0.22
@@ -16421,6 +16429,7 @@ GameObject:
   - component: {fileID: 1819439838}
   - component: {fileID: 1819439837}
   - component: {fileID: 1819439836}
+  - component: {fileID: 1819439839}
   m_Layer: 0
   m_Name: SnowIsland_Terrain
   m_TagString: Untagged
@@ -16522,6 +16531,31 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1819439834}
   m_Mesh: {fileID: 4300000, guid: 829c3d419a831b24e8f362b416b1705a, type: 2}
+--- !u!114 &1819439839
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1819439834}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6807793cf404d99468cffc1fa38a6d2f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::SnowFactory.Gameplay.SnowPile
+  maxScoops: 80
+  minScaleRatio: 0.28
+  useExistingMesh: 1
+  sourceCustomMesh: {fileID: 4300000, guid: 829c3d419a831b24e8f362b416b1705a, type: 2}
+  preserveLowPolyFlatShading: 1
+  shrinkOverallScaleOnScoop: 0
+  radialSegments: 40
+  ringSegments: 18
+  driftRidgeStrength: 0.22
+  noiseSeedOffset: 13.7
+  craterRadius: 2.2
+  craterDepth: 0.65
+  scoopBurstParticles: {fileID: 1823779991}
 --- !u!1 &1823779990
 GameObject:
   m_ObjectHideFlags: 0
@@ -21634,6 +21668,10 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::SnowFactory.Gameplay.SnowPile
   maxScoops: 12
   minScaleRatio: 0.2
+  useExistingMesh: 0
+  sourceCustomMesh: {fileID: 0}
+  preserveLowPolyFlatShading: 1
+  shrinkOverallScaleOnScoop: 1
   radialSegments: 40
   ringSegments: 18
   driftRidgeStrength: 0.22
