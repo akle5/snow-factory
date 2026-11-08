@@ -192,11 +192,29 @@ namespace SnowFactory.Gameplay
             Ray ray = new Ray(cam.transform.position, cam.transform.forward);
             SnowPile hoveredPile = null;
             FireplaceHearth hoveredFireplace = null;
+            Vector3 targetHitPoint = Vector3.zero;
 
-            if (Physics.Raycast(ray, out RaycastHit hit, interactDistance))
+            RaycastHit[] hits = Physics.RaycastAll(ray, interactDistance);
+            float closestPileDist = float.MaxValue;
+            float closestFireDist = float.MaxValue;
+
+            for (int i = 0; i < hits.Length; i++)
             {
-                hoveredPile = hit.collider.GetComponentInParent<SnowPile>();
-                hoveredFireplace = hit.collider.GetComponentInParent<FireplaceHearth>();
+                RaycastHit h = hits[i];
+                FireplaceHearth fire = h.collider.GetComponentInParent<FireplaceHearth>();
+                if (fire != null && h.distance < closestFireDist)
+                {
+                    closestFireDist = h.distance;
+                    hoveredFireplace = fire;
+                }
+
+                SnowPile pile = h.collider.GetComponentInParent<SnowPile>();
+                if (pile != null && h.distance < closestPileDist)
+                {
+                    closestPileDist = h.distance;
+                    hoveredPile = pile;
+                    targetHitPoint = h.point;
+                }
             }
 
             if (_continuousDigCooldown > 0f)
@@ -276,7 +294,7 @@ namespace SnowFactory.Gameplay
                 }
 
                 float radiusMult = 1.0f + _bladeUpgradeLevel * 0.22f;
-                if (hoveredPile.TryScoopAtPoint(hit.point, radiusMult, infiniteTestingMode))
+                if (hoveredPile.TryScoopAtPoint(targetHitPoint, radiusMult, infiniteTestingMode))
                 {
                     // If the pile is part of a multi-mesh terrain group (e.g. Sketchfab_LowPolySnowIsland with Terrain + Cave submeshes),
                     // also excavate sibling SnowPile meshes around the same world hit point so no rocky/ice sub-mesh remains floating!
@@ -288,7 +306,7 @@ namespace SnowFactory.Gameplay
                         {
                             if (siblingPiles[s] != hoveredPile)
                             {
-                                siblingPiles[s].TryScoopAtPoint(hit.point, radiusMult, true);
+                                siblingPiles[s].TryScoopAtPoint(targetHitPoint, radiusMult, true);
                             }
                         }
                     }
@@ -298,7 +316,7 @@ namespace SnowFactory.Gameplay
                     _continuousDigCooldown = 0.11f;
                     FactoryEvents.RaiseShovelLoadChanged(_currentSnowLoad, infiniteTestingMode ? 999 : maxSnowCapacity);
 
-                    SpawnScoopChunkFromPile(hit.point);
+                    SpawnScoopChunkFromPile(targetHitPoint);
 
                     if (!infiniteTestingMode)
                     {

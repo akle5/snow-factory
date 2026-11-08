@@ -30,7 +30,7 @@ namespace SnowFactory.Gameplay
         [Header("Localized Excavation")]
         [SerializeField] private float craterRadius = 0.42f;
         [SerializeField] private float craterDepth = 0.26f;
-        [SerializeField] private float minWorldFloorY = 0.03f;
+        [SerializeField] private float minWorldFloorY = -0.06f;
         [SerializeField] private ParticleSystem scoopBurstParticles;
 
         private int _remainingScoops;
@@ -356,8 +356,8 @@ namespace SnowFactory.Gameplay
 
                     float dy = vWorld.y - worldHitPoint.y;
 
-                    // Ignore vertices that are already deep below the shovel strike
-                    if (dy < -worldRadius * 1.15f)
+                    // Only ignore vertices that are far below the shovel strike AND already buried near/under the floor
+                    if (dy < -worldRadius * 2.5f && vWorld.y <= minWorldFloorY + 0.05f)
                     {
                         continue;
                     }
@@ -642,6 +642,14 @@ namespace SnowFactory.Gameplay
                 Vector3 e1 = verts[i1] - verts[i0];
                 Vector3 e2 = verts[i2] - verts[i0];
                 Vector3 faceNormal = Vector3.Cross(e1, e2).normalized;
+
+                // Ensure flattened/collapsed overhang faces always orient their normals toward the sky (+Y in world space)
+                // so they never render pitch-black due to inverted winding order after flattening.
+                Vector3 worldNormal = transform.TransformDirection(faceNormal);
+                if (worldNormal.y < 0f)
+                {
+                    faceNormal = -faceNormal;
+                }
 
                 norms[i0] += faceNormal;
                 norms[i1] += faceNormal;
