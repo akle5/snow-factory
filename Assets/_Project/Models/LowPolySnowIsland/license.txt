@@ -1,0 +1,11 @@
+Model Information:
+* title:	Low Poly Snow Island
+* source:	https://sketchfab.com/3d-models/low-poly-snow-island-34eeb35d2a514f499d277d535e7999d9
+* author:	Sahir Virmani (https://sketchfab.com/sahirvirmani)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Low Poly Snow Island" (https://sketchfab.com/3d-models/low-poly-snow-island-34eeb35d2a514f499d277d535e7999d9) by Sahir Virmani (https://sketchfab.com/sahirvirmani) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
