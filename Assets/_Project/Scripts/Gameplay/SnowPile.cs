@@ -289,14 +289,17 @@ namespace SnowFactory.Gameplay
             InitializeDeformableMesh();
         }
 
-        public bool TryScoopAtPoint(Vector3 worldHitPoint, float radiusMultiplier = 1.0f)
+        public bool TryScoopAtPoint(Vector3 worldHitPoint, float radiusMultiplier = 1.0f, bool ignoreDepletion = false)
         {
-            if (_remainingScoops <= 0)
+            if (!ignoreDepletion && _remainingScoops <= 0)
             {
                 return false;
             }
 
-            _remainingScoops--;
+            if (!ignoreDepletion)
+            {
+                _remainingScoops--;
+            }
 
             // Play snow powder burst at the exact shovel impact point
             if (scoopBurstParticles != null)
@@ -307,7 +310,7 @@ namespace SnowFactory.Gameplay
 
             CarveCraterAtWorldPoint(worldHitPoint, radiusMultiplier);
 
-            if (shrinkOverallScaleOnScoop)
+            if (shrinkOverallScaleOnScoop && !ignoreDepletion)
             {
                 UpdateOverallVolumeScale();
             }

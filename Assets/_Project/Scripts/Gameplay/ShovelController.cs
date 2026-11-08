@@ -38,10 +38,12 @@ namespace SnowFactory.Gameplay
         [SerializeField] private int maxSnowCapacity = 3;
         [SerializeField] private int upgradeCapacityStep = 2;
         [SerializeField] private int nextUpgradeCost = 30;
+        [SerializeField] private bool infiniteTestingMode;
 
         private int _currentSnowLoad;
         private int _bladeUpgradeLevel;
         private float _swingAnimTimer;
+        private float _continuousDigCooldown;
         private Quaternion _restLocalRotation;
         private Vector3 _restLocalPosition;
         private Vector3 _baseScoopHeadScale = Vector3.one;
@@ -197,76 +199,97 @@ namespace SnowFactory.Gameplay
                 hoveredFireplace = hit.collider.GetComponentInParent<FireplaceHearth>();
             }
 
+            if (_continuousDigCooldown > 0f)
+            {
+                _continuousDigCooldown -= Time.deltaTime;
+            }
+
+            string testTag = infiniteTestingMode ? "   |   [I] MODO INFINITO: ACTIVO (Mantén Clic para excavar)" : "   |   [I] Pala Infinita (Test)";
+
             if (hoveredFireplace != null && _currentSnowLoad > 0)
             {
                 FactoryEvents.RaisePromptChanged(
-                    $"[Clic Izq / E] Lanzar {_currentSnowLoad} palada(s) al fuego   |   [U] Pala Ancha Nv.{_bladeUpgradeLevel + 2} ({nextUpgradeCost} Monedas)");
+                    $"[Clic Izq / E] Lanzar {_currentSnowLoad} palada(s) al fuego   |   [U] Pala Ancha Nv.{_bladeUpgradeLevel + 2} ({nextUpgradeCost} Monedas){testTag}");
             }
-            else if (hoveredPile != null && hoveredPile.HasSnow)
+            else if (hoveredPile != null && (hoveredPile.HasSnow || infiniteTestingMode))
             {
-                if (_currentSnowLoad < maxSnowCapacity)
+                if (infiniteTestingMode)
                 {
                     FactoryEvents.RaisePromptChanged(
-                        $"[Clic Izq / E] Excavar nieve ({_currentSnowLoad}/{maxSnowCapacity} en pala) — Quedan {hoveredPile.RemainingScoops} en el montón");
+                        $"[MODO TEST INFINITO] Clic o Mantén Clic Izquierdo para excavar sin límite ({_currentSnowLoad} acumuladas)   |   [I] Desactivar");
+                }
+                else if (_currentSnowLoad < maxSnowCapacity)
+                {
+                    FactoryEvents.RaisePromptChanged(
+                        $"[Clic Izq / E] Excavar nieve ({_currentSnowLoad}/{maxSnowCapacity} en pala) — Quedan {hoveredPile.RemainingScoops} en el montón{testTag}");
                 }
                 else
                 {
                     FactoryEvents.RaisePromptChanged(
-                        $"¡Pala llena ({_currentSnowLoad}/{maxSnowCapacity})! Apunta a la chimenea para lanzar la nieve al fuego");
+                        $"¡Pala llena ({_currentSnowLoad}/{maxSnowCapacity})! Apunta a la chimenea para lanzar la nieve al fuego{testTag}");
                 }
             }
             else if (_currentSnowLoad > 0)
             {
                 FactoryEvents.RaisePromptChanged(
-                    $"Pala con {_currentSnowLoad}/{maxSnowCapacity} de nieve — Apunta a la chimenea para lanzarla al fuego");
+                    $"Pala con {_currentSnowLoad}/{(infiniteTestingMode ? 999 : maxSnowCapacity)} de nieve — Apunta a la chimenea para lanzarla al fuego{testTag}");
             }
             else
             {
                 FactoryEvents.RaisePromptChanged(
-                    $"Apunta al montón de nieve para excavar (0/{maxSnowCapacity})   |   [U] Ensanchar Pala ({nextUpgradeCost} Monedas)   |   [R] Nueva Nevada");
+                    $"Apunta al montón de nieve para excavar (0/{maxSnowCapacity})   |   [U] Ensanchar Pala ({nextUpgradeCost} Monedas)   |   [R] Nueva Nevada{testTag}");
             }
 
             if (Cursor.lockState != CursorLockMode.Locked) return;
 
-            bool actionPressed = (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame) ||
-                                 (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame);
+            bool singlePress = (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame) ||
+                               (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame);
 
-            if (!actionPressed) return;
+            bool holdDig = infiniteTestingMode &&
+                           _continuousDigCooldown <= 0f &&
+                           ((Mouse.current != null && Mouse.current.leftButton.isPressed) ||
+                            (Keyboard.current != null && Keyboard.current.eKey.isPressed));
+
+            if (!singlePress && !holdDig) return;
 
             // Priority 1: Throw snow chunks in a physical parabolic arc into the fireplace!
-            if (hoveredFireplace != null && _currentSnowLoad > 0)
+            if (hoveredFireplace != null && _currentSnowLoad > 0 && singlePress)
             {
                 int deliveredCount = _currentSnowLoad;
                 _currentSnowLoad = 0;
                 _swingAnimTimer = 0.36f;
                 RefreshBladeClumpBed();
-                FactoryEvents.RaiseShovelLoadChanged(_currentSnowLoad, maxSnowCapacity);
+                FactoryEvents.RaiseShovelLoadChanged(_currentSnowLoad, infiniteTestingMode ? 999 : maxSnowCapacity);
 
                 SpawnThrowChunksToFireplace(hoveredFireplace, deliveredCount);
                 return;
             }
 
             // Priority 2: Scoop snow from the pile — carve wider crater and launch a chunk from hit.point onto the blade!
-            if (hoveredPile != null && hoveredPile.HasSnow)
+            if (hoveredPile != null && (hoveredPile.HasSnow || infiniteTestingMode))
             {
-                if (_currentSnowLoad >= maxSnowCapacity)
+                if (!infiniteTestingMode && _currentSnowLoad >= maxSnowCapacity)
                 {
                     FactoryEvents.RaiseStatusMessage(
-                        $"¡La cuchara está llena ({_currentSnowLoad}/{maxSnowCapacity})! Lanza la nieve al fuego o pulsa [U] para ensanchar la pala.");
+                        $"¡La cuchara está llena ({_currentSnowLoad}/{maxSnowCapacity})! Lanza la nieve al fuego, pulsa [U] para ensanchar o [I] para Pala Infinita.");
                     return;
                 }
 
                 float radiusMult = 1.0f + _bladeUpgradeLevel * 0.22f;
-                if (hoveredPile.TryScoopAtPoint(hit.point, radiusMult))
+                if (hoveredPile.TryScoopAtPoint(hit.point, radiusMult, infiniteTestingMode))
                 {
                     _currentSnowLoad++;
-                    _swingAnimTimer = 0.30f;
-                    FactoryEvents.RaiseShovelLoadChanged(_currentSnowLoad, maxSnowCapacity);
+                    _swingAnimTimer = 0.24f;
+                    _continuousDigCooldown = 0.11f;
+                    FactoryEvents.RaiseShovelLoadChanged(_currentSnowLoad, infiniteTestingMode ? 999 : maxSnowCapacity);
 
                     SpawnScoopChunkFromPile(hit.point);
 
-                    FactoryEvents.RaiseStatusMessage(
-                        $"Nieve recogida en la cuchara: {_currentSnowLoad}/{maxSnowCapacity} (Quedan {hoveredPile.RemainingScoops} en este montón)");
+                    if (!infiniteTestingMode)
+                    {
+                        FactoryEvents.RaiseStatusMessage(
+                            $"Nieve recogida en la cuchara: {_currentSnowLoad}/{maxSnowCapacity} (Quedan {hoveredPile.RemainingScoops} en este montón)");
+                    }
                 }
             }
         }
@@ -394,6 +417,16 @@ namespace SnowFactory.Gameplay
         {
             Keyboard kb = Keyboard.current;
             if (kb == null) return;
+
+            // [I] Testing Shortcut: Toggle Infinite Excavation Shovel (no capacity cap, no pile depletion, hold LMB/E to dig continuously)
+            if (kb.iKey.wasPressedThisFrame)
+            {
+                infiniteTestingMode = !infiniteTestingMode;
+                FactoryEvents.RaiseShovelLoadChanged(_currentSnowLoad, infiniteTestingMode ? 999 : maxSnowCapacity);
+                FactoryEvents.RaiseStatusMessage(infiniteTestingMode
+                    ? "⚡ [MODO TEST] Pala de Excavación Infinita ACTIVADA (Sin límite de carga y puedes mantener pulsado Clic Izquierdo para cavar)."
+                    : "[MODO TEST] Pala de Excavación Infinita DESACTIVADA.");
+            }
 
             // [U] Option B: Wide-Blade Shovel Upgrade! Widens the physical metal ScoopHead and increases capacity
             if (kb.uKey.wasPressedThisFrame)

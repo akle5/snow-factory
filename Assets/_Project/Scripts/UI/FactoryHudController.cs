@@ -45,7 +45,7 @@ namespace SnowFactory.UI
                 _statusClearTimer -= Time.deltaTime;
                 if (_statusClearTimer <= 0f && statusText != null)
                 {
-                    statusText.text = "[Clic Izq / E] Apilar Nieve / Echar al Fuego   |   [U] Mejorar Pala   |   [R] Nueva Nevada";
+                    statusText.text = "[Clic Izq / E] Apilar Nieve / Echar al Fuego   |   [U] Mejorar Pala   |   [R] Nueva Nevada   |   [I] Pala Infinita (Test)";
                 }
             }
         }
