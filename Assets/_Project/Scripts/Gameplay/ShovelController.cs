@@ -278,6 +278,21 @@ namespace SnowFactory.Gameplay
                 float radiusMult = 1.0f + _bladeUpgradeLevel * 0.22f;
                 if (hoveredPile.TryScoopAtPoint(hit.point, radiusMult, infiniteTestingMode))
                 {
+                    // If the pile is part of a multi-mesh terrain group (e.g. Sketchfab_LowPolySnowIsland with Terrain + Cave submeshes),
+                    // also excavate sibling SnowPile meshes around the same world hit point so no rocky/ice sub-mesh remains floating!
+                    Transform parentGroup = hoveredPile.transform.parent;
+                    if (parentGroup != null)
+                    {
+                        SnowPile[] siblingPiles = parentGroup.GetComponentsInChildren<SnowPile>();
+                        for (int s = 0; s < siblingPiles.Length; s++)
+                        {
+                            if (siblingPiles[s] != hoveredPile)
+                            {
+                                siblingPiles[s].TryScoopAtPoint(hit.point, radiusMult, true);
+                            }
+                        }
+                    }
+
                     _currentSnowLoad++;
                     _swingAnimTimer = 0.24f;
                     _continuousDigCooldown = 0.11f;

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace SnowFactory.Gameplay
@@ -29,6 +30,7 @@ namespace SnowFactory.Gameplay
         [Header("Localized Excavation")]
         [SerializeField] private float craterRadius = 0.42f;
         [SerializeField] private float craterDepth = 0.26f;
+        [SerializeField] private float minWorldFloorY = 0.03f;
         [SerializeField] private ParticleSystem scoopBurstParticles;
 
         private int _remainingScoops;
@@ -40,8 +42,12 @@ namespace SnowFactory.Gameplay
 
         private Mesh _deformableMesh;
         private Vector3[] _vertices;
+        private Vector3[] _initialLocalVertices;
         private int[] _triangles;
         private Color[] _vertexColors;
+        private List<int>[] _vertexNeighbors;
+        private List<int>[] _weldedVertexClusters;
+        private int[] _vertexToClusterIndex;
 
         public int RemainingScoops => _remainingScoops;
         public int MaxScoops => maxScoops;
@@ -115,7 +121,9 @@ namespace SnowFactory.Gameplay
             _deformableMesh.name = $"Deformable_{baseMesh.name}";
 
             _vertices = _deformableMesh.vertices;
+            _initialLocalVertices = (Vector3[])_vertices.Clone();
             _triangles = _deformableMesh.triangles;
+            BuildTopologicalNeighbors(_vertices.Length, _triangles);
 
             _vertexColors = _deformableMesh.colors;
             if (_vertexColors == null || _vertexColors.Length != _vertices.Length)
@@ -323,9 +331,14 @@ namespace SnowFactory.Gameplay
 
             if (useExistingMesh)
             {
-                // World-space excavation for arbitrary rotated/scaled 3D assets (e.g. Blender Z-up Sketchfab island)
+                // World-space excavation for arbitrary rotated/scaled 3D assets (e.g. Blender Z-up Sketchfab island).
+                // Handles tall mountain peaks & vertical ice/snow pillars cleanly:
+                // 1) Never pushes vertices upward above their current/original height (prevents infinite-mode obelisk extrusions).
+                // 2) Collapses overhanging peak/pillar vertices above the hit point when digging into the base or side of a peak.
+                // 3) Enforces a natural angle-of-repose slope around the crater so razor-thin spikes cannot survive.
                 float worldRadius = craterRadius * Mathf.Clamp(radiusMultiplier, 0.8f, 2.2f);
-                float sqrWorldRadius = worldRadius * worldRadius;
+                float collapseRadius = worldRadius * 1.55f;
+                float sqrCollapseRadius = collapseRadius * collapseRadius;
                 Matrix4x4 localToWorld = transform.localToWorldMatrix;
                 Matrix4x4 worldToLocal = transform.worldToLocalMatrix;
 
@@ -334,24 +347,141 @@ namespace SnowFactory.Gameplay
                     Vector3 vWorld = localToWorld.MultiplyPoint3x4(_vertices[i]);
                     float dx = vWorld.x - worldHitPoint.x;
                     float dz = vWorld.z - worldHitPoint.z;
+                    float horizDistSq = dx * dx + dz * dz;
+
+                    if (horizDistSq >= sqrCollapseRadius)
+                    {
+                        continue;
+                    }
+
                     float dy = vWorld.y - worldHitPoint.y;
 
-                    // Horizontal distance + vertical tolerance so only the surface layer near the shovel hit is carved
-                    float horizDistSq = dx * dx + dz * dz;
-                    if (horizDistSq < sqrWorldRadius && Mathf.Abs(dy) < worldRadius * 1.4f)
+                    // Ignore vertices that are already deep below the shovel strike
+                    if (dy < -worldRadius * 1.15f)
                     {
-                        float dist = Mathf.Sqrt(horizDistSq);
-                        float normalized = dist / worldRadius;
+                        continue;
+                    }
 
+                    float dist = Mathf.Sqrt(horizDistSq);
+                    float newWorldY = vWorld.y;
+                    float aoDelta = 0f;
+
+                    if (dist < worldRadius)
+                    {
+                        float normalized = dist / worldRadius;
                         float falloff = Mathf.Cos(normalized * Mathf.PI * 0.5f);
                         float depression = falloff * falloff * craterDepth;
-                        float rimPush = Mathf.Sin(normalized * Mathf.PI) * (craterDepth * 0.14f) * (1f - falloff);
 
-                        vWorld.y -= (depression - rimPush);
+                        if (dy <= worldRadius * 0.65f)
+                        {
+                            // Normal surface excavation near the shovel impact
+                            newWorldY = vWorld.y - depression;
+                            aoDelta = falloff * 0.35f;
+                        }
+                        else
+                        {
+                            // Overhang / Pillar Collapse: vertex is high above the shovel hit (e.g. mountain peak or ice pillar).
+                            // Digging the base or flank of a peak collapses the upper column downward smoothly!
+                            float targetCollapsedY = worldHitPoint.y - depression * 0.5f + dist * 0.85f;
+                            float collapsePull = Mathf.Max(depression * 1.65f, (vWorld.y - targetCollapsedY) * (0.58f * falloff + 0.25f));
+                            newWorldY = vWorld.y - collapsePull;
+                            aoDelta = falloff * 0.30f;
+                        }
+                    }
+                    else
+                    {
+                        // Outer stability ring (worldRadius .. 1.55 * worldRadius):
+                        // Enforce a natural snow slope (angle of repose) so adjacent peaks/walls don't form vertical needles
+                        float outerT = 1f - ((dist - worldRadius) / (collapseRadius - worldRadius));
+                        float maxStableY = worldHitPoint.y + (dist - worldRadius * 0.35f) * 1.35f;
+                        if (vWorld.y > maxStableY)
+                        {
+                            float excess = vWorld.y - maxStableY;
+                            newWorldY = vWorld.y - Mathf.Min(excess, craterDepth * 1.35f) * outerT * 0.65f;
+                            aoDelta = outerT * 0.15f;
+                        }
+                    }
+
+                    // Clamp to ground floor and ensure a vertex never rises above its current height
+                    newWorldY = Mathf.Clamp(newWorldY, minWorldFloorY, vWorld.y);
+
+                    if (_initialLocalVertices != null && i < _initialLocalVertices.Length)
+                    {
+                        float origWorldY = localToWorld.MultiplyPoint3x4(_initialLocalVertices[i]).y;
+                        newWorldY = Mathf.Min(newWorldY, origWorldY);
+                    }
+
+                    if (newWorldY < vWorld.y)
+                    {
+                        vWorld.y = newWorldY;
                         _vertices[i] = worldToLocal.MultiplyPoint3x4(vWorld);
 
                         float currentAo = _vertexColors[i].r;
-                        _vertexColors[i] = new Color(Mathf.Max(0.25f, currentAo - falloff * 0.35f), 1f, 1f, 1f);
+                        _vertexColors[i] = new Color(Mathf.Max(0.25f, currentAo - aoDelta), 1f, 1f, 1f);
+                    }
+                }
+
+                // Pass 2: Topological Anti-Spike Relaxation around the excavated crater!
+                // Any vertex inside or near the crater that stands sharply above its connected triangle neighbors
+                // is smoothly pulled down so thin blades/needles never remain behind.
+                if (_vertexNeighbors != null)
+                {
+                    float relaxRadiusSq = (collapseRadius * 1.25f) * (collapseRadius * 1.25f);
+                    for (int pass = 0; pass < 2; pass++)
+                    {
+                        for (int i = 0; i < _vertices.Length; i++)
+                        {
+                            Vector3 vWorld = localToWorld.MultiplyPoint3x4(_vertices[i]);
+                            float dx = vWorld.x - worldHitPoint.x;
+                            float dz = vWorld.z - worldHitPoint.z;
+                            if (dx * dx + dz * dz >= relaxRadiusSq) continue;
+
+                            List<int> neighbors = _vertexNeighbors[i];
+                            if (neighbors == null || neighbors.Count == 0) continue;
+
+                            float sumY = 0f;
+                            float minNeighborY = vWorld.y;
+                            for (int n = 0; n < neighbors.Count; n++)
+                            {
+                                float ny = localToWorld.MultiplyPoint3x4(_vertices[neighbors[n]]).y;
+                                sumY += ny;
+                                if (ny < minNeighborY) minNeighborY = ny;
+                            }
+
+                            float avgNeighborY = sumY / neighbors.Count;
+                            bool modified = false;
+                            // If this vertex protrudes above the average of its neighbors (or has a steep drop), pull it down
+                            if (vWorld.y > avgNeighborY + 0.18f)
+                            {
+                                vWorld.y = Mathf.Max(minWorldFloorY, Mathf.Lerp(vWorld.y, avgNeighborY + 0.12f, 0.65f));
+                                modified = true;
+                            }
+                            else if (vWorld.y - minNeighborY > 1.35f)
+                            {
+                                vWorld.y = Mathf.Max(minWorldFloorY, Mathf.Lerp(vWorld.y, minNeighborY + 1.15f, 0.50f));
+                                modified = true;
+                            }
+
+                            if (modified)
+                            {
+                                Vector3 newLocal = worldToLocal.MultiplyPoint3x4(vWorld);
+                                _vertices[i] = newLocal;
+
+                                // Keep co-located unshared vertices welded together so zero hairline cracks open between triangles!
+                                if (_weldedVertexClusters != null && _vertexToClusterIndex != null)
+                                {
+                                    int cIdx = _vertexToClusterIndex[i];
+                                    if (cIdx >= 0)
+                                    {
+                                        List<int> cluster = _weldedVertexClusters[cIdx];
+                                        for (int k = 0; k < cluster.Count; k++)
+                                        {
+                                            _vertices[cluster[k]] = newLocal;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -375,9 +505,8 @@ namespace SnowFactory.Gameplay
 
                         float falloff = Mathf.Cos(normalized * Mathf.PI * 0.5f);
                         float depression = falloff * falloff * craterDepth;
-                        float rimPush = Mathf.Sin(normalized * Mathf.PI) * 0.03f * (1f - falloff);
 
-                        v.y = Mathf.Max(-0.08f, v.y - depression + rimPush);
+                        v.y = Mathf.Clamp(v.y - depression, -0.08f, v.y);
                         _vertices[i] = v;
 
                         float currentAo = _vertexColors[i].r;
@@ -405,6 +534,94 @@ namespace SnowFactory.Gameplay
             {
                 meshCol.sharedMesh = null;
                 meshCol.sharedMesh = _deformableMesh;
+            }
+        }
+
+        private void BuildTopologicalNeighbors(int vertexCount, int[] tris)
+        {
+            _vertexNeighbors = new List<int>[vertexCount];
+            for (int i = 0; i < vertexCount; i++)
+            {
+                _vertexNeighbors[i] = new List<int>(12);
+            }
+
+            // 1) Group co-located vertices (critical for flat-shaded low-poly meshes where every triangle has unshared vertices!)
+            var spatialBuckets = new Dictionary<Vector3Int, List<int>>(vertexCount);
+            for (int i = 0; i < vertexCount; i++)
+            {
+                Vector3 v = _vertices[i];
+                Vector3Int key = new Vector3Int(
+                    Mathf.RoundToInt(v.x * 500f),
+                    Mathf.RoundToInt(v.y * 500f),
+                    Mathf.RoundToInt(v.z * 500f));
+
+                if (!spatialBuckets.TryGetValue(key, out List<int> list))
+                {
+                    list = new List<int>(6);
+                    spatialBuckets[key] = list;
+                }
+                list.Add(i);
+            }
+
+            _weldedVertexClusters = new List<int>[spatialBuckets.Count];
+            _vertexToClusterIndex = new int[vertexCount];
+            int cIndex = 0;
+            foreach (var kvp in spatialBuckets)
+            {
+                List<int> cluster = kvp.Value;
+                _weldedVertexClusters[cIndex] = cluster;
+                for (int k = 0; k < cluster.Count; k++)
+                {
+                    _vertexToClusterIndex[cluster[k]] = cIndex;
+                }
+                cIndex++;
+            }
+
+            // 2) Add triangle edges, propagating across co-located vertices so the graph spans adjacent faces seamlessly
+            if (tris == null) return;
+            for (int t = 0; t < tris.Length; t += 3)
+            {
+                int a = tris[t];
+                int b = tris[t + 1];
+                int c = tris[t + 2];
+
+                AddNeighborUnique(a, b);
+                AddNeighborUnique(a, c);
+                AddNeighborUnique(b, a);
+                AddNeighborUnique(b, c);
+                AddNeighborUnique(c, a);
+                AddNeighborUnique(c, b);
+            }
+
+            // Share neighbors among all co-located duplicate vertices at the same corner
+            foreach (var kvp in spatialBuckets)
+            {
+                List<int> cluster = kvp.Value;
+                if (cluster.Count <= 1) continue;
+
+                for (int i = 0; i < cluster.Count; i++)
+                {
+                    int vA = cluster[i];
+                    for (int j = 0; j < cluster.Count; j++)
+                    {
+                        if (i == j) continue;
+                        int vB = cluster[j];
+                        List<int> neighborsOfB = _vertexNeighbors[vB];
+                        for (int k = 0; k < neighborsOfB.Count; k++)
+                        {
+                            AddNeighborUnique(vA, neighborsOfB[k]);
+                        }
+                    }
+                }
+            }
+        }
+
+        private void AddNeighborUnique(int v, int n)
+        {
+            List<int> list = _vertexNeighbors[v];
+            if (!list.Contains(n))
+            {
+                list.Add(n);
             }
         }
 
