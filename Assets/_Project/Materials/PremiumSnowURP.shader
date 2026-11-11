@@ -24,14 +24,6 @@ Shader "SnowFactory/PremiumSnowURP"
         _RimColor ("Rim Glow Color", Color) = (0.82, 0.93, 1.0, 1.0)
         _RimPower ("Rim Power", Range(1.0, 8.0)) = 3.2
         _RimIntensity ("Rim Intensity", Range(0.0, 2.0)) = 0.48
-
-        [Header(Sketchfab Snow PBR Textures)]
-        [NoScaleOffset] _SnowAlbedoMap ("Snow BaseColor Texture", 2D) = "white" {}
-        [NoScaleOffset] _SnowNormalMap ("Snow Normal Map", 2D) = "bump" {}
-        [NoScaleOffset] _SnowMaskMap ("Snow MetallicRoughnessAO Map", 2D) = "white" {}
-        _SnowTexTiling ("Triplanar World Tiling", Float) = 0.22
-        _SnowTexBlend ("Snow Albedo Detail Strength", Range(0.0, 1.0)) = 0.65
-        _SnowNormalStrength ("Snow Normal Map Strength", Range(0.0, 2.0)) = 0.85
     }
 
     SubShader
@@ -58,13 +50,6 @@ Shader "SnowFactory/PremiumSnowURP"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
-            TEXTURE2D(_SnowAlbedoMap);
-            SAMPLER(sampler_SnowAlbedoMap);
-            TEXTURE2D(_SnowNormalMap);
-            SAMPLER(sampler_SnowNormalMap);
-            TEXTURE2D(_SnowMaskMap);
-            SAMPLER(sampler_SnowMaskMap);
-
             CBUFFER_START(UnityPerMaterial)
                 float4 _LitSnowColor;
                 float4 _ShadowSnowColor;
@@ -81,9 +66,6 @@ Shader "SnowFactory/PremiumSnowURP"
                 float4 _RimColor;
                 float _RimPower;
                 float _RimIntensity;
-                float _SnowTexTiling;
-                float _SnowTexBlend;
-                float _SnowNormalStrength;
             CBUFFER_END
 
             struct Attributes
@@ -179,39 +161,7 @@ Shader "SnowFactory/PremiumSnowURP"
                 float hZ = SnowFBM((posWS + float3(0, 0, eps)) * _MacroScale) * 0.65 + Noise3D((posWS + float3(0, 0, eps)) * _MicroScale) * 0.35;
 
                 float3 grad = float3(hX - hCenter, 0.0, hZ - hCenter) / eps;
-
-                // 1b. Triplanar sampling of Sketchfab "Snow Material" PBR textures (cropping UV Y to [0.08..0.92] to avoid polar triangles)
-                float3 absN = pow(abs(input.normalWS), 4.0);
-                float3 triWeights = absN / max(dot(absN, float3(1.0, 1.0, 1.0)), 0.0001);
-
-                float2 uvX = frac(posWS.zy * _SnowTexTiling);
-                float2 uvY = frac(posWS.xz * _SnowTexTiling);
-                float2 uvZ = frac(posWS.xy * _SnowTexTiling);
-                uvX.y = lerp(0.08, 0.92, uvX.y);
-                uvY.y = lerp(0.08, 0.92, uvY.y);
-                uvZ.y = lerp(0.08, 0.92, uvZ.y);
-
-                float3 texColX = SAMPLE_TEXTURE2D(_SnowAlbedoMap, sampler_SnowAlbedoMap, uvX).rgb;
-                float3 texColY = SAMPLE_TEXTURE2D(_SnowAlbedoMap, sampler_SnowAlbedoMap, uvY).rgb;
-                float3 texColZ = SAMPLE_TEXTURE2D(_SnowAlbedoMap, sampler_SnowAlbedoMap, uvZ).rgb;
-                float3 snowAlbedoTex = texColX * triWeights.x + texColY * triWeights.y + texColZ * triWeights.z;
-
-                float3 maskX = SAMPLE_TEXTURE2D(_SnowMaskMap, sampler_SnowMaskMap, uvX).rgb;
-                float3 maskY = SAMPLE_TEXTURE2D(_SnowMaskMap, sampler_SnowMaskMap, uvY).rgb;
-                float3 maskZ = SAMPLE_TEXTURE2D(_SnowMaskMap, sampler_SnowMaskMap, uvZ).rgb;
-                float3 snowMaskTex = maskX * triWeights.x + maskY * triWeights.y + maskZ * triWeights.z;
-                float texAO = lerp(1.0, saturate(snowMaskTex.r * 1.15), _SnowTexBlend);
-
-                float3 nrmX = SAMPLE_TEXTURE2D(_SnowNormalMap, sampler_SnowNormalMap, uvX).rgb * 2.0 - 1.0;
-                float3 nrmY = SAMPLE_TEXTURE2D(_SnowNormalMap, sampler_SnowNormalMap, uvY).rgb * 2.0 - 1.0;
-                float3 nrmZ = SAMPLE_TEXTURE2D(_SnowNormalMap, sampler_SnowNormalMap, uvZ).rgb * 2.0 - 1.0;
-                float3 triNormalOffset = float3(
-                    nrmY.x * triWeights.y + nrmZ.x * triWeights.z,
-                    nrmX.y * triWeights.x + nrmZ.y * triWeights.z,
-                    nrmX.x * triWeights.x + nrmY.y * triWeights.y
-                ) * _SnowNormalStrength;
-
-                float3 normalWS = normalize(input.normalWS - grad * _BumpStrength + triNormalOffset * 0.42);
+                float3 normalWS = normalize(input.normalWS - grad * _BumpStrength);
 
                 // 2. Main Light + Soft Wrapped Diffuse + Subsurface Scattering
                 float4 shadowCoord = TransformWorldToShadowCoord(posWS);
@@ -247,11 +197,6 @@ Shader "SnowFactory/PremiumSnowURP"
                 float3 baseSnow = hardnessLayer > 0.5
                     ? lerp(compactIceColor, softSnowColor, (hardnessLayer - 0.5) * 2.0)
                     : lerp(glacierCoreColor, compactIceColor, hardnessLayer * 2.0);
-
-                // Blend the Sketchfab Snow Material BaseColor + AO detail into the snow/ice strata
-                float3 normalizedSnowTex = saturate(snowAlbedoTex * 1.32);
-                float3 texturedSnow = baseSnow * lerp(float3(1.0, 1.0, 1.0), normalizedSnowTex, _SnowTexBlend) * texAO;
-                baseSnow = texturedSnow;
 
                 // Boost crystal sparkles when glacier ice is exposed!
                 float iceSparkleBoost = lerp(1.85, 1.0, hardnessLayer);
