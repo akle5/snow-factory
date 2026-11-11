@@ -174,10 +174,11 @@ Shader "SnowFactory/PremiumSnowURP"
                     float3 dirY = axisY / objScale.y;
                     float3 dirZ = axisZ / objScale.z;
 
-                    float3 sampleP = input.positionOS_local * objScale;
+                    // Offset away from local origin (0,0,0) to avoid Hash33(0,0,0) == 0 singularity
+                    float3 sampleP = input.positionOS_local * objScale + float3(17.3, 9.1, 23.7);
                     sparkleCoord = sampleP;
 
-                    float eps = 0.015;
+                    float eps = clamp(0.06 / max(_MicroScale, 1.0), 0.002, 0.015);
                     float hCenter = SnowFBM(sampleP * _MacroScale) * 0.60 + Noise3D(sampleP * _MicroScale) * 0.40;
                     float hX = SnowFBM((sampleP + float3(eps, 0.0, 0.0)) * _MacroScale) * 0.60 + Noise3D((sampleP + float3(eps, 0.0, 0.0)) * _MicroScale) * 0.40;
                     float hY = SnowFBM((sampleP + float3(0.0, eps, 0.0)) * _MacroScale) * 0.60 + Noise3D((sampleP + float3(0.0, eps, 0.0)) * _MicroScale) * 0.40;
@@ -202,7 +203,7 @@ Shader "SnowFactory/PremiumSnowURP"
                     float hZ = SnowFBM((posWS + float3(0, 0, eps)) * _MacroScale) * 0.65 + Noise3D((posWS + float3(0, 0, eps)) * _MicroScale) * 0.35;
 
                     float3 grad = float3(hX - hCenter, 0.0, hZ - hCenter) / eps;
-                    normalWS = normalize(input.normalWS - grad * _BumpStrength);
+                    normalWS = SafeNormalize(input.normalWS - grad * _BumpStrength);
                 }
 
                 // 2. Main Light + Soft Wrapped Diffuse + Subsurface Scattering
@@ -252,7 +253,7 @@ Shader "SnowFactory/PremiumSnowURP"
                 float3 hearthPos = float3(4.5, 0.95, 8.2);
                 float3 toHearth = hearthPos - posWS;
                 float distSq = dot(toHearth, toHearth);
-                float3 hearthDir = normalize(toHearth);
+                float3 hearthDir = SafeNormalize(toHearth);
                 float hearthWrap = saturate((dot(normalWS, hearthDir) + 0.35) / 1.35);
                 float hearthAtten = saturate(1.0 / (1.0 + distSq * 0.14)) * saturate(1.0 - distSq / 85.0);
                 float3 additionalLightsColor = float3(1.0, 0.48, 0.14) * (hearthWrap * hearthAtten * 0.95);
@@ -268,8 +269,8 @@ Shader "SnowFactory/PremiumSnowURP"
                 float distToGlint = length(cellLocal - glintOffset);
                 float circularDot = 1.0 - smoothstep(0.04, 0.19, distToGlint);
 
-                float3 crystalFacetDir = normalize(rnd * 2.0 - 1.0);
-                float3 halfVec = normalize(mainLight.direction + viewDirWS * 1.45);
+                float3 crystalFacetDir = SafeNormalize(rnd * 2.0 - 1.0);
+                float3 halfVec = SafeNormalize(mainLight.direction + viewDirWS * 1.45);
                 float crystalAlign = abs(dot(crystalFacetDir, halfVec));
                 float sparkleMask = circularDot * smoothstep(_SparkleThreshold, 0.995, crystalAlign);
 

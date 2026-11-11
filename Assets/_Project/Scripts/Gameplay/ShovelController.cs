@@ -85,7 +85,13 @@ namespace SnowFactory.Gameplay
         {
             shovelPivot = pivot;
             heldSnowVisual = snowChunkOnBlade;
+            scoopHead = null;
             ResolveReferences();
+            if (Application.isPlaying && scoopHead != null)
+            {
+                BuildMultiClumpBedOnShovel();
+                RefreshBladeClumpBed();
+            }
         }
 
         public void SetWheelbarrowControlActive(bool driving, WheelbarrowController wheelbarrow)
@@ -200,6 +206,10 @@ namespace SnowFactory.Gameplay
                 }
 
                 _panCavityMap = ProceduralSnowMeshUtility.BuildShovelPanCavityMap(plasticMf.sharedMesh, plasticToScoopHead);
+            }
+            else
+            {
+                _panCavityMap = ProceduralSnowMeshUtility.BuildShovelPanCavityMap(null, Matrix4x4.identity);
             }
 
             _shovelSnowMesh = new Mesh
@@ -503,7 +513,10 @@ namespace SnowFactory.Gameplay
                 return;
             }
 
-            GameObject chunk = CreateFlyingSnowSphere(new Vector3(0.18f, 0.085f, 0.16f), _clodVariantCounter++, scoopMultiplier);
+            GameObject chunk = CreateFlyingSnowClump(
+                new Vector3(Random.Range(0.15f, 0.19f), Random.Range(0.11f, 0.15f), Random.Range(0.14f, 0.18f)),
+                _clodVariantCounter++,
+                scoopMultiplier);
             chunk.transform.position = hitWorldPoint + Vector3.up * 0.04f;
 
             _flyingChunks.Add(new FlyingSnowChunk
@@ -586,7 +599,10 @@ namespace SnowFactory.Gameplay
                     Random.Range(0.0f, 0.08f),
                     Random.Range(-0.14f, 0.14f));
 
-                GameObject chunk = CreateFlyingSnowSphere(new Vector3(0.18f, 0.085f, 0.17f), i + _clodVariantCounter++, avgMultiplier);
+                GameObject chunk = CreateFlyingSnowClump(
+                    new Vector3(Random.Range(0.15f, 0.19f), Random.Range(0.11f, 0.15f), Random.Range(0.14f, 0.18f)),
+                    i + _clodVariantCounter++,
+                    avgMultiplier);
                 chunk.transform.position = startPos + jitter * 0.25f;
 
                 _flyingChunks.Add(new FlyingSnowChunk
@@ -620,7 +636,10 @@ namespace SnowFactory.Gameplay
                     Random.Range(-0.05f, 0.12f),
                     Random.Range(-0.12f, 0.12f));
 
-                GameObject chunk = CreateFlyingSnowSphere(new Vector3(0.20f, 0.095f, 0.18f), i + _clodVariantCounter++, avgMultiplier);
+                GameObject chunk = CreateFlyingSnowClump(
+                    new Vector3(Random.Range(0.16f, 0.21f), Random.Range(0.12f, 0.16f), Random.Range(0.15f, 0.20f)),
+                    i + _clodVariantCounter++,
+                    avgMultiplier);
                 chunk.transform.position = startPos + jitter * 0.35f;
 
                 _flyingChunks.Add(new FlyingSnowChunk
@@ -640,7 +659,7 @@ namespace SnowFactory.Gameplay
             }
         }
 
-        private GameObject CreateFlyingSnowSphere(Vector3 scale, int variant, float avgMultiplier)
+        private GameObject CreateFlyingSnowClump(Vector3 scale, int variant, float avgMultiplier)
         {
             GameObject go = new GameObject("FlyingSnowClump");
             go.transform.localScale = scale;
@@ -868,6 +887,15 @@ namespace SnowFactory.Gameplay
 
         private void OnDestroy()
         {
+            for (int i = 0; i < _flyingChunks.Count; i++)
+            {
+                if (_flyingChunks[i].ChunkTransform != null)
+                {
+                    Destroy(_flyingChunks[i].ChunkTransform.gameObject);
+                }
+            }
+            _flyingChunks.Clear();
+
             if (_shovelSnowMesh != null)
             {
                 Destroy(_shovelSnowMesh);

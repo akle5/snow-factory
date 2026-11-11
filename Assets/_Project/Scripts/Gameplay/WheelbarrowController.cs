@@ -89,6 +89,25 @@ namespace SnowFactory.Gameplay
             traySnowRoot = snowContainer;
             bodyCollider = mainCollider;
             snowMaterial = snowMat;
+
+            if (!Application.isPlaying) return;
+
+            ResolveReferences();
+
+            if ((_traySnowMoundGo == null || _traySnowMoundGo.transform.parent != traySnowRoot || _cavityMap == null) && traySnowRoot != null)
+            {
+                BuildTraySnowBed();
+            }
+            else if (_traySnowMoundGo != null)
+            {
+                MeshRenderer mr = _traySnowMoundGo.GetComponent<MeshRenderer>();
+                if (mr != null && _traySnowMaterialInstance != null)
+                {
+                    mr.sharedMaterial = _traySnowMaterialInstance;
+                }
+            }
+
+            RefreshTraySnowVisuals();
         }
 
         private void ResolveReferences()
@@ -152,6 +171,10 @@ namespace SnowFactory.Gameplay
                 }
 
                 _cavityMap = ProceduralSnowMeshUtility.BuildWheelbarrowCavityMap(bodyMf.sharedMesh, bodyToSnowLocal);
+            }
+            else
+            {
+                _cavityMap = ProceduralSnowMeshUtility.BuildWheelbarrowCavityMap(null, Matrix4x4.identity);
             }
 
             _traySnowMesh = new Mesh
@@ -274,9 +297,9 @@ namespace SnowFactory.Gameplay
                 GameObject go = new GameObject("WheelbarrowDumpChunk");
                 go.transform.position = startPos + spread * 0.45f;
                 go.transform.localScale = new Vector3(
-                    Random.Range(0.16f, 0.24f),
-                    Random.Range(0.11f, 0.17f),
-                    Random.Range(0.16f, 0.23f));
+                    Random.Range(0.16f, 0.22f),
+                    Random.Range(0.13f, 0.18f),
+                    Random.Range(0.15f, 0.21f));
                 go.transform.rotation = Random.rotation;
 
                 MeshFilter mf = go.AddComponent<MeshFilter>();
@@ -565,6 +588,15 @@ namespace SnowFactory.Gameplay
 
         private void OnDestroy()
         {
+            for (int i = 0; i < _dumpChunks.Count; i++)
+            {
+                if (_dumpChunks[i].ChunkTransform != null)
+                {
+                    Destroy(_dumpChunks[i].ChunkTransform.gameObject);
+                }
+            }
+            _dumpChunks.Clear();
+
             if (_traySnowMesh != null)
             {
                 Destroy(_traySnowMesh);

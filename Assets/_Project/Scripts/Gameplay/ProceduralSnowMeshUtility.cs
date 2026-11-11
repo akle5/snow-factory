@@ -195,26 +195,32 @@ namespace SnowFactory.Gameplay
                 new CarriedSnowMaterialProfile(3.2f, 13.0f, 0.32f, 54f, 2.4f, 0.48f);
 
             public static readonly CarriedSnowMaterialProfile FlyingClod =
-                new CarriedSnowMaterialProfile(1.85f, 8.5f, 0.22f, 44f, 2.4f, 0.46f);
+                new CarriedSnowMaterialProfile(4.2f, 15.0f, 0.24f, 48f, 2.5f, 0.46f);
         }
 
         public static Material FindSceneSnowMaterial()
         {
             SnowPile[] piles = Object.FindObjectsByType<SnowPile>(FindObjectsSortMode.None);
+            Material premiumShaderMat = null;
             Material fallbackMat = null;
             for (int i = 0; i < piles.Length; i++)
             {
                 if (piles[i] == null) continue;
                 MeshRenderer mr = piles[i].GetComponent<MeshRenderer>();
                 if (mr == null || mr.sharedMaterial == null) continue;
-                if (fallbackMat == null) fallbackMat = mr.sharedMaterial;
-                if (mr.sharedMaterial.name == "M_SnowFloor")
+                Material mat = mr.sharedMaterial;
+                if (fallbackMat == null) fallbackMat = mat;
+                if (mat.name == "M_SnowFloor")
                 {
-                    return mr.sharedMaterial;
+                    return mat;
+                }
+                if (premiumShaderMat == null && mat.shader != null && mat.shader.name == "SnowFactory/PremiumSnowURP")
+                {
+                    premiumShaderMat = mat;
                 }
             }
 
-            return fallbackMat;
+            return premiumShaderMat != null ? premiumShaderMat : fallbackMat;
         }
 
         public static Material GetOrCreateCarriedSnowMaterial(
@@ -233,19 +239,29 @@ namespace SnowFactory.Gameplay
                     name = string.IsNullOrEmpty(instanceName) ? "M_CarriedSnowRuntime" : instanceName
                 };
                 targetInstance.SetFloat("_UseObjectSpace", 1f);
-                targetInstance.SetFloat("_MacroScale", profile.MacroScale);
-                targetInstance.SetFloat("_MicroScale", profile.MicroScale);
-                targetInstance.SetFloat("_BumpStrength", profile.BumpStrength);
-                targetInstance.SetFloat("_SparkleScale", profile.SparkleScale);
-                targetInstance.SetFloat("_SparkleIntensity", profile.SparkleIntensity);
-                targetInstance.SetFloat("_RimIntensity", profile.RimIntensity);
+                targetInstance.SetFloat("_MacroScale", SanitizePositive(profile.MacroScale, 1.85f));
+                targetInstance.SetFloat("_MicroScale", SanitizePositive(profile.MicroScale, 8.5f));
+                targetInstance.SetFloat("_BumpStrength", SanitizeRange(profile.BumpStrength, 0f, 1.5f, 0.24f));
+                targetInstance.SetFloat("_SparkleScale", SanitizePositive(profile.SparkleScale, 44f));
+                targetInstance.SetFloat("_SparkleIntensity", SanitizeRange(profile.SparkleIntensity, 0f, 6f, 2.5f));
+                targetInstance.SetFloat("_RimIntensity", SanitizeRange(profile.RimIntensity, 0f, 2f, 0.46f));
                 targetInstance.SetColor("_SubsurfaceColor", CarriedSubsurfaceColor);
-                targetInstance.SetFloat("_SubsurfaceWrap", 0.52f);
-                targetInstance.SetFloat("_SubsurfaceStrength", 0.65f);
+                targetInstance.SetFloat("_SubsurfaceWrap", 0.58f);
+                targetInstance.SetFloat("_SubsurfaceStrength", 0.74f);
             }
 
             ApplyCarriedSnowHardnessTint(targetInstance, avgHardnessMultiplier);
             return targetInstance;
+        }
+
+        private static float SanitizePositive(float value, float fallback)
+        {
+            return (!float.IsNaN(value) && !float.IsInfinity(value) && value > 0f) ? value : fallback;
+        }
+
+        private static float SanitizeRange(float value, float min, float max, float fallback)
+        {
+            return (!float.IsNaN(value) && !float.IsInfinity(value)) ? Mathf.Clamp(value, min, max) : fallback;
         }
 
         public static void ApplyCarriedSnowHardnessTint(Material material, float avgHardnessMultiplier)
@@ -295,8 +311,8 @@ namespace SnowFactory.Gameplay
         /// </summary>
         public static Mesh BuildOrganicSnowClodMesh(int seed, int iceTier = 0)
         {
-            List<Vector3> verts = new List<Vector3>(162);
-            List<int> tris = new List<int>(960);
+            List<Vector3> verts = new List<Vector3>(642);
+            List<int> tris = new List<int>(3840);
 
             // 1. Seed regular icosahedron
             float phi = (1f + Mathf.Sqrt(5f)) * 0.5f;
@@ -320,8 +336,8 @@ namespace SnowFactory.Gameplay
             };
             tris.AddRange(baseTris);
 
-            // 2. Subdivide twice with deduplicated edge midpoints (162 verts, 320 uniform triangles)
-            for (int sub = 0; sub < 2; sub++)
+            // 2. Subdivide three times with deduplicated edge midpoints (642 verts, 1280 smooth organic triangles)
+            for (int sub = 0; sub < 3; sub++)
             {
                 Dictionary<long, int> midpointCache = new Dictionary<long, int>(tris.Count);
                 List<int> nextTris = new List<int>(tris.Count * 4);
@@ -359,32 +375,41 @@ namespace SnowFactory.Gameplay
                 tris = nextTris;
             }
 
-            // 3. Apply organic clod displacement and smooth stratified snow/ice colors
+            // 3. Apply organic clod displacement (asymmetrical lumpy snow/ice chunks, never smooth pills)
+            //    and domain-warped snow/ice marbling matching WheelbarrowSnowMound.
             Color[] cols = new Color[verts.Count];
+            float seedAngle = (seed % 7) * 0.9f;
+            Vector3 lobeAxisA = new Vector3(Mathf.Cos(seedAngle), 0.35f, Mathf.Sin(seedAngle)).normalized;
+            Vector3 lobeAxisB = new Vector3(-Mathf.Sin(seedAngle * 1.3f), -0.45f, Mathf.Cos(seedAngle * 1.3f)).normalized;
+
             for (int i = 0; i < verts.Count; i++)
             {
                 Vector3 dir = verts[i];
-                float n1 = Mathf.PerlinNoise(dir.x * 1.15f + seed * 1.7f, dir.z * 1.15f + dir.y * 0.9f + seed * 0.61f) - 0.5f;
-                float n2 = Mathf.PerlinNoise(dir.y * 2.1f - seed * 0.43f, dir.x * 2.0f + dir.z * 1.8f) - 0.5f;
-                float n3 = Mathf.PerlinNoise(dir.z * 3.6f + seed * 0.19f, dir.x * 3.4f - dir.y * 2.7f) - 0.5f;
+                float n1 = Mathf.PerlinNoise(dir.x * 1.35f + seed * 1.7f + 4.1f, dir.z * 1.35f + dir.y * 1.05f + seed * 0.61f) - 0.5f;
+                float n2 = Mathf.PerlinNoise(dir.y * 2.4f - seed * 0.43f + 9.2f, dir.x * 2.3f + dir.z * 2.1f) - 0.5f;
+                float n3 = Mathf.PerlinNoise(dir.z * 4.2f + seed * 0.19f + 2.7f, dir.x * 4.0f - dir.y * 3.1f) - 0.5f;
 
-                float radial = 0.50f * (1.0f + n1 * 0.24f + n2 * 0.11f + n3 * 0.04f);
-                Vector3 p = dir * radial;
-                p.y *= 0.78f;
+                float lobeA = Mathf.Clamp01(Vector3.Dot(dir, lobeAxisA) * 0.5f + 0.5f);
+                float lobeB = Mathf.Clamp01(Vector3.Dot(dir, lobeAxisB) * 0.5f + 0.5f);
+                float chunkBulge = (lobeA * lobeA * 0.14f) - (lobeB * lobeB * 0.10f);
+
+                float radial = 0.50f * (1.0f + chunkBulge + n1 * 0.34f + n2 * 0.12f + n3 * 0.03f);
+                Vector3 p = dir * Mathf.Clamp(radial, 0.34f, 0.62f);
+                p.y *= 0.86f;
                 verts[i] = p;
 
-                float ao = Mathf.Clamp01(0.76f + n1 * 0.20f + dir.y * 0.16f);
+                float ao = Mathf.Clamp(0.90f + n1 * 0.14f + dir.y * 0.06f, 0.78f, 1.0f);
 
                 float layerG = 1.0f;
-                if (iceTier == 1)
+                if (iceTier >= 1)
                 {
-                    float strata = Mathf.Clamp01(0.55f + dir.y * 0.28f + dir.x * 0.16f + n1 * 0.35f);
-                    layerG = Mathf.Lerp(0.45f, 0.94f, strata);
-                }
-                else if (iceTier >= 2)
-                {
-                    float strata = Mathf.Clamp01(0.48f + dir.y * 0.34f + dir.x * 0.20f + n1 * 0.38f);
-                    layerG = Mathf.Lerp(0.20f, 0.78f, strata);
+                    float warp = (n1 * 0.34f + n2 * 0.18f);
+                    float veinNoise = Mathf.PerlinNoise(
+                        (dir.x + warp) * 1.8f + seed * 0.37f + 5.3f,
+                        (dir.z - warp) * 2.2f + dir.y * 1.3f + 2.9f);
+                    float frostCrest = Mathf.Clamp((chunkBulge + n1 * 0.25f) * 2.4f, -0.22f, 0.28f);
+                    float veinWeight = Mathf.Clamp01((iceTier >= 2 ? 0.72f : 0.44f) + (veinNoise - 0.48f) * 1.15f - frostCrest);
+                    layerG = Mathf.Lerp(0.96f, iceTier >= 2 ? 0.16f : 0.42f, veinWeight);
                 }
 
                 cols[i] = new Color(ao, layerG, 1f, 1f);
