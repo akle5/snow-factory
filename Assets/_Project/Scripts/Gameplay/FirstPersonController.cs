@@ -23,10 +23,18 @@ namespace SnowFactory.Gameplay
         [SerializeField] private float initialPitchAngle = 14f;
         [SerializeField] private bool lockCursorOnStart = true;
 
+        [Header("Wheelbarrow Driving Settings")]
+        [SerializeField] private float vehiclePushSpeed = 6.8f;
+        [SerializeField] private float vehicleSprintSpeed = 9.4f;
+        [SerializeField] private float vehicleReverseSpeed = 4.2f;
+        [SerializeField] private float vehicleSteerSpeed = 95f;
+
         private CharacterController _controller;
         private float _verticalVelocity;
         private float _cameraPitch;
         private int _ignoreMouseFrames = 5;
+        private bool _isDrivingWheelbarrow;
+        private WheelbarrowController _activeWheelbarrow;
 
         public Transform CameraRoot => cameraRoot;
         public bool IsGrounded => _controller != null && _controller.isGrounded;
@@ -72,6 +80,35 @@ namespace SnowFactory.Gameplay
             cameraRoot = targetRoot;
         }
 
+        public void SetWheelbarrowDriving(
+            bool driving,
+            WheelbarrowController wheelbarrow,
+            Vector3 alignedWorldPos,
+            float targetYaw)
+        {
+            _isDrivingWheelbarrow = driving;
+            _activeWheelbarrow = wheelbarrow;
+
+            if (driving)
+            {
+                bool wasEnabled = _controller != null && _controller.enabled;
+                if (wasEnabled) _controller.enabled = false;
+                transform.position = alignedWorldPos;
+                transform.rotation = Quaternion.Euler(0f, targetYaw, 0f);
+                if (wasEnabled) _controller.enabled = true;
+
+                _verticalVelocity = -2f;
+                if (_cameraPitch < 8f || _cameraPitch > 35f)
+                {
+                    _cameraPitch = 15f;
+                    if (cameraRoot != null)
+                    {
+                        cameraRoot.localRotation = Quaternion.Euler(_cameraPitch, 0f, 0f);
+                    }
+                }
+            }
+        }
+
         private void HandleCursorToggle()
         {
             Keyboard keyboard = Keyboard.current;
@@ -110,6 +147,13 @@ namespace SnowFactory.Gameplay
         {
             Vector2 moveInput = ReadMoveInput();
             bool isSprinting = Keyboard.current != null && Keyboard.current.leftShiftKey.isPressed;
+
+            if (_isDrivingWheelbarrow && _activeWheelbarrow != null)
+            {
+                HandleWheelbarrowMovement(moveInput, isSprinting);
+                return;
+            }
+
             bool jumpPressed = Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
 
             float targetSpeed = isSprinting ? sprintSpeed : walkSpeed;
@@ -135,6 +179,43 @@ namespace SnowFactory.Gameplay
 
             Vector3 finalVelocity = HorizontalVelocity + Vector3.up * _verticalVelocity;
             _controller.Move(finalVelocity * Time.deltaTime);
+        }
+
+        private void HandleWheelbarrowMovement(Vector2 moveInput, bool isSprinting)
+        {
+            // A/D steers smoothly while Mouse X also steers the heading naturally
+            if (Mathf.Abs(moveInput.x) > 0.01f)
+            {
+                float steerScale = moveInput.y < -0.1f ? -0.8f : 1.0f;
+                transform.Rotate(Vector3.up * (moveInput.x * steerScale * vehicleSteerSpeed * Time.deltaTime));
+            }
+
+            float loadRatio = _activeWheelbarrow.MaxCapacity > 0
+                ? (float)_activeWheelbarrow.CurrentLoad / _activeWheelbarrow.MaxCapacity
+                : 0f;
+            float loadWeightFactor = Mathf.Lerp(1.0f, 0.82f, loadRatio);
+
+            float forwardSpeed = isSprinting ? vehicleSprintSpeed : vehiclePushSpeed;
+            float speed = moveInput.y >= 0f
+                ? moveInput.y * forwardSpeed * loadWeightFactor
+                : moveInput.y * vehicleReverseSpeed * loadWeightFactor;
+
+            Vector3 forwardFlat = Vector3.ProjectOnPlane(transform.forward, Vector3.up).normalized;
+
+            if (speed > 0.01f && _activeWheelbarrow.CheckFrontObstacle(transform.position, forwardFlat, speed * Time.deltaTime))
+            {
+                speed = 0f;
+            }
+
+            HorizontalVelocity = forwardFlat * speed;
+
+            if (_controller.isGrounded && _verticalVelocity < 0f)
+            {
+                _verticalVelocity = -2f;
+            }
+
+            _verticalVelocity += gravity * Time.deltaTime;
+            _controller.Move((HorizontalVelocity + Vector3.up * _verticalVelocity) * Time.deltaTime);
         }
 
         private static Vector2 ReadMoveInput()

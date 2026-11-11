@@ -44,8 +44,13 @@ El Unity Hub del usuario se ejecuta como paquete MSIX (`WindowsApps`), por lo qu
 ### Perspectiva y Controles
 - **Primera Persona 3D**: `CharacterController` + `InputSystem` (`WASD`, salto `Space`, sprint `LeftShift`, vista ratón con `CinemachineCamera`, `Esc` para bloquear/liberar cursor).
 - **Interacción con Pala Equipada**:
-  - `Clic Izquierdo` o `E` apuntando a un `SnowPile` (con la pala vacía): recoge una palada de nieve y encoge el montón.
-  - `Clic Izquierdo` o `E` apuntando a `FireplaceHearth` (con la pala cargada): arroja la nieve al fuego de la chimenea.
+  - `Clic Izquierdo` o `E` apuntando a un `SnowPile` (con la pala vacía o capacidad libre): excava el estrato de nieve/hielo y carga grumos en la hoja.
+  - `Clic Izquierdo` o `E` apuntando a `Wheelbarrow`: transfiere la nieve de la pala dentro de la cuba de la carretilla conservando su multiplicador térmico (`x1 / x2 / x3`).
+  - `Clic Izquierdo` o `E` apuntando a `FireplaceHearth` (con la pala cargada): arroja la nieve directamente al fuego de la chimenea.
+- **Conducción y Volcado de Carretilla (`WheelbarrowController`)**:
+  - `[F]` cerca/apuntando a la carretilla (o `[E]` con la pala vacía): agarra los mangos y activa el modo conducción en primera persona (la pala se guarda temporalmente).
+  - `[WASD + Ratón]` + `[LeftShift]`: empuja y gira suavemente la carretilla por el patio o las laderas nevadas (adaptación de inclinación al terreno, amortiguación por peso de carga, giro físico de la rueda delantera y freno ante muros).
+  - `[Clic Izquierdo / E]` cerca de `FireplaceHearth`: vuelca toda la carga de la carretilla de golpe al fuego, disparando un torrente parabólico de pellas, reacción de llama y Monedas de Calor.
 
 ### Stack y Paquetes Base
 - `com.unity.render-pipelines.universal` (`17.3.0`)
@@ -57,11 +62,13 @@ El Unity Hub del usuario se ejecuta como paquete MSIX (`WindowsApps`), por lo qu
 
 ### Estructura Modular (`Assets/_Project/`)
 - `Assets/_Project/Scripts/Core/` — `Palette.cs` (colores base y emisivos del entorno, pala y chimenea), `FactoryEvents.cs` (eventos desacoplados del HUD).
-- `Assets/_Project/Scripts/Gameplay/` — `FirstPersonController.cs`, `ShovelController.cs`, `SnowPile.cs`, `FireplaceHearth.cs`.
+- `Assets/_Project/Scripts/Gameplay/` — `FirstPersonController.cs`, `ShovelController.cs`, `SnowPile.cs`, `FireplaceHearth.cs`, `WheelbarrowController.cs`.
 - `Assets/_Project/Scripts/UI/` — `FactoryHudController.cs` (controlador UI Toolkit enlazado a `UIDocument`).
 - `Assets/_Project/UI/` — `FactoryHud.uxml`, `FactoryHud.uss`, `FactoryHudPanelSettings.asset`.
 - `Assets/_Project/Scenes/` — `Boot.unity`, `MainGame.unity`, `TestSandbox.unity`.
-- `Assets/_Project/Prefabs/`, `Materials/`, `Audio/`, `Settings/`.
+- `Assets/_Project/Prefabs/` — `PF_Wheelbarrow.prefab`.
+- `Assets/_Project/Models/` — `LowPolySnowIsland/`, `ShovelSnow/`, `Wheelbarrow/`.
+- `Assets/_Project/Materials/`, `Audio/`, `Settings/`.
 
 ---
 
@@ -178,5 +185,13 @@ El Unity Hub del usuario se ejecuta como paquete MSIX (`WindowsApps`), por lo qu
   - Se trasladó `shovel_snow.zip` desde `E:\Descargas 3TB v2\shovel_snow.zip` al disco `D:\` dentro del proyecto (`Assets/_Project/Models/ShovelSnow/`), extrayendo `scene.gltf`, `scene.bin`, `license.txt` (CC-BY-4.0, autor Klimuk Sergey) y `textures/Logo_white_baseColor.png`.
   - Se convirtieron las primitivas glTF a assets nativos `Mesh` de Unity y se separó la malla metálica en el tubo del mango (`ShovelSnow_MetalShaft.asset`) y el filo cortante delantero (`ShovelSnow_CuttingLip.asset`), junto con la cuchara de plástico negro nervado (`ShovelSnow_BlackPlastic.asset`, `21.138` vértices) y el logo del mango (`ShovelSnow_LogoWhite.asset`).
   - Se reemplazó la pala primitiva bajo `Player/CameraRoot/ShovelPivot/ScoopHead` por el nuevo modelo 3D manteniendo todas las mecánicas conectadas: cama de 9 grumos de nieve (`ClumpBedRoot`) ajustada al interior cóncavo nervado, ensanchamiento físico con `[U]` y brillo incandescente exclusivo en el labio metálico delantero (`BladeCuttingEdge`) al mejorar el Filo Térmico con `[T]`.
-- **Reversión del Material PBR Triplanar `Snow Material` en `SnowIsland_Terrain` (`f404656` revertido)**:
-  - Por preferencia estética del usuario, se revirtió el commit `f404656` eliminando `Assets/_Project/Materials/SketchfabSnowMaterial/` y restaurando `M_SnowIslandTerrain`, `M_SnowIslandRock`, `PremiumSnowURP.shader`, `M_ShovelLogoWhite.mat` y `MainGame.unity` al estilo estilizado alpino de [`c5c265f`], conservando intacta la pala 3D de Sketchfab (`Shovel snow`).
+- **Reversión del Material PBR Triplanar `Snow Material` en `SnowIsland_Terrain` (`f404656` revertido en `d4213f2`)**:
+  - Por preferencia estética del usuario, se revirtió el commit `f404656` eliminando `Assets/_Project/Materials/SketchfabSnowMaterial/` y restaurando `M_SnowIslandTerrain`, `M_SnowIslandRock`, `PremiumSnowURP.shader`, `M_ShovelLogoWhite.mat` y `MainGame.unity` al estilo estilizado alpino de `c5c265f`, conservando intacta la pala 3D de Sketchfab (`Shovel snow`).
+- **Carretilla Conducible con Carga Acumulable de Nieve y Volcado en la Chimenea (`Wheelbarrow_13_MB`)**:
+  - Se extrajo `wheelbarrow_13_mb.zip` en [`Assets/_Project/Models/Wheelbarrow/`](file:///D:/Unity%20Antigravity/Snow%20Factory/Assets/_Project/Models/Wheelbarrow/) (`scene.gltf`, `scene.bin`, `license.txt` bajo licencia CC-BY-4.0 de Mehdi Shahsavan, y texturas PBR) eliminando el `.zip` original tras la extracción.
+  - Se generó el asset separado del chasis/cuba (`Wheelbarrow_Base.asset`) y la rueda delantera (`Wheelbarrow_Wheel.asset`) orientados con `+Z` al frente y pivote común en el eje de la rueda (`(0.0175, 0.1981, 0.3621)`), junto al material PBR URP de doble cara [`M_Wheelbarrow.mat`](file:///D:/Unity%20Antigravity/Snow%20Factory/Assets/_Project/Models/Wheelbarrow/M_Wheelbarrow.mat) con mapa metálico/suavidad convertido desde canales glTF (`B -> R`, `1-G -> A`) y mapa normal.
+  - Implementación de [`WheelbarrowController.cs`](file:///D:/Unity%20Antigravity/Snow%20Factory/Assets/_Project/Scripts/Gameplay/WheelbarrowController.cs) y creación de [`PF_Wheelbarrow.prefab`](file:///D:/Unity%20Antigravity/Snow%20Factory/Assets/_Project/Prefabs/PF_Wheelbarrow.prefab) instanciado en [`MainGame.unity`](file:///D:/Unity%20Antigravity/Snow%20Factory/Assets/_Project/Scenes/MainGame.unity):
+    - Capacidad de **`24` paladas** con cama visual de `14` grumos de nieve en el interior de la cuba que se tiñen gradualmente según la proporción de Hielo Compacto (`x2`) y Núcleo Glaciar (`x3`) acumulado.
+    - Conducción en primera persona (`[F]` cerca o `[E]` con pala vacía): elevación de mangos `+6°`, seguimiento suave delante del jugador, giro físico de la rueda delantera según la distancia recorrida, adaptación automática de inclinación al terreno y comprobación frontal de obstáculos (`CheckFrontObstacle`).
+    - Carga desde la pala (`ShovelController.SpawnPourChunksToWheelbarrow`) con transferencia en parábola y multiplicadores preservados, y volcado directo en la hoguera (`[Clic Izq / E]` en rango de `FireplaceHearth`) con animación frontal `+38°` y ráfaga múltiple al fuego.
+  - Ampliación de [`FactoryEvents.cs`](file:///D:/Unity%20Antigravity/Snow%20Factory/Assets/_Project/Scripts/Core/FactoryEvents.cs), [`FirstPersonController.cs`](file:///D:/Unity%20Antigravity/Snow%20Factory/Assets/_Project/Scripts/Gameplay/FirstPersonController.cs), [`ShovelController.cs`](file:///D:/Unity%20Antigravity/Snow%20Factory/Assets/_Project/Scripts/Gameplay/ShovelController.cs), [`FactoryHudController.cs`](file:///D:/Unity%20Antigravity/Snow%20Factory/Assets/_Project/Scripts/UI/FactoryHudController.cs) y [`FactoryHud.uxml`](file:///D:/Unity%20Antigravity/Snow%20Factory/Assets/_Project/UI/FactoryHud.uxml) con indicador permanente `CARRETILLA: X/24`.

@@ -1,0 +1,11 @@
+Model Information:
+* title:	Wheelbarrow_13_MB
+* source:	https://sketchfab.com/3d-models/wheelbarrow-13-mb-4bc60cee597d4330998d411d71ac58e3
+* author:	Mehdi Shahsavan (https://sketchfab.com/ahmagh2e)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Wheelbarrow_13_MB" (https://sketchfab.com/3d-models/wheelbarrow-13-mb-4bc60cee597d4330998d411d71ac58e3) by Mehdi Shahsavan (https://sketchfab.com/ahmagh2e) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

@@ -52,6 +52,8 @@ namespace SnowFactory.Gameplay
         private Vector3 _restLocalPosition;
         private Vector3 _baseScoopHeadScale = Vector3.one;
         private FireplaceHearth _cachedHearth;
+        private FirstPersonController _firstPersonController;
+        private WheelbarrowController _drivingWheelbarrow;
         private Material _snowMaterial;
 
         private readonly List<Transform> _bladeClumpVisuals = new List<Transform>();
@@ -108,8 +110,26 @@ namespace SnowFactory.Gameplay
             ResolveReferences();
         }
 
+        public void SetWheelbarrowControlActive(bool driving, WheelbarrowController wheelbarrow)
+        {
+            _drivingWheelbarrow = driving ? wheelbarrow : null;
+            if (shovelPivot != null)
+            {
+                shovelPivot.gameObject.SetActive(!driving);
+            }
+        }
+
         private void ResolveReferences()
         {
+            if (_firstPersonController == null)
+            {
+                _firstPersonController = GetComponent<FirstPersonController>();
+                if (_firstPersonController == null)
+                {
+                    _firstPersonController = GetComponentInParent<FirstPersonController>();
+                }
+            }
+
             if (shovelPivot != null)
             {
                 _restLocalPosition = shovelPivot.localPosition;
@@ -204,34 +224,52 @@ namespace SnowFactory.Gameplay
 
         private void UpdateHoverAndInteract()
         {
+            if (_drivingWheelbarrow != null)
+            {
+                UpdateDrivingWheelbarrowInteraction();
+                return;
+            }
+
             Camera cam = Camera.main;
             if (cam == null) return;
 
             Ray ray = new Ray(cam.transform.position, cam.transform.forward);
             SnowPile hoveredPile = null;
             FireplaceHearth hoveredFireplace = null;
+            WheelbarrowController hoveredWheelbarrow = null;
             Vector3 targetHitPoint = Vector3.zero;
 
-            RaycastHit[] hits = Physics.RaycastAll(ray, interactDistance);
+            RaycastHit[] hits = Physics.RaycastAll(ray, Mathf.Max(interactDistance, 4.0f));
             float closestPileDist = float.MaxValue;
             float closestFireDist = float.MaxValue;
+            float closestWbDist = float.MaxValue;
 
             for (int i = 0; i < hits.Length; i++)
             {
                 RaycastHit h = hits[i];
-                FireplaceHearth fire = h.collider.GetComponentInParent<FireplaceHearth>();
-                if (fire != null && h.distance < closestFireDist)
+                if (h.distance <= interactDistance)
                 {
-                    closestFireDist = h.distance;
-                    hoveredFireplace = fire;
+                    FireplaceHearth fire = h.collider.GetComponentInParent<FireplaceHearth>();
+                    if (fire != null && h.distance < closestFireDist)
+                    {
+                        closestFireDist = h.distance;
+                        hoveredFireplace = fire;
+                    }
+
+                    SnowPile pile = h.collider.GetComponentInParent<SnowPile>();
+                    if (pile != null && h.distance < closestPileDist)
+                    {
+                        closestPileDist = h.distance;
+                        hoveredPile = pile;
+                        targetHitPoint = h.point;
+                    }
                 }
 
-                SnowPile pile = h.collider.GetComponentInParent<SnowPile>();
-                if (pile != null && h.distance < closestPileDist)
+                WheelbarrowController wb = h.collider.GetComponentInParent<WheelbarrowController>();
+                if (wb != null && h.distance < closestWbDist)
                 {
-                    closestPileDist = h.distance;
-                    hoveredPile = pile;
-                    targetHitPoint = h.point;
+                    closestWbDist = h.distance;
+                    hoveredWheelbarrow = wb;
                 }
             }
 
@@ -240,15 +278,38 @@ namespace SnowFactory.Gameplay
                 _continuousDigCooldown -= Time.deltaTime;
             }
 
+            WheelbarrowController nearbyWheelbarrow = hoveredWheelbarrow != null
+                ? hoveredWheelbarrow
+                : FindNearestWheelbarrow(3.4f);
+
             string testTag = infiniteTestingMode ? "   |   [I] MODO INFINITO: ACTIVO" : "   |   [I] Pala Infinita (Test)";
             string thermalUpgradeTag = _thermalEdgeLevel < 3
                 ? $"   |   [T] Filo Térmico Nv.{_thermalEdgeLevel + 1} ({nextThermalUpgradeCost} Monedas)"
                 : "   |   Filo Térmico MÁX (Nv.3)";
+            string driveTag = nearbyWheelbarrow != null ? "   |   [F] Conducir Carretilla" : "";
 
             if (hoveredFireplace != null && _currentSnowLoad > 0)
             {
                 FactoryEvents.RaisePromptChanged(
                     $"[Clic Izq / E] Lanzar {_currentSnowLoad} palada(s) al fuego (Valor x{(float)Mathf.Max(1, _accumulatedValueUnits) / _currentSnowLoad:F1})   |   [U] Pala Ancha ({nextUpgradeCost}){thermalUpgradeTag}");
+            }
+            else if (hoveredWheelbarrow != null)
+            {
+                if (_currentSnowLoad > 0 && hoveredWheelbarrow.HasCapacity)
+                {
+                    FactoryEvents.RaisePromptChanged(
+                        $"[Clic Izq / E] Echar {_currentSnowLoad} palada(s) en la carretilla ({hoveredWheelbarrow.CurrentLoad}/{hoveredWheelbarrow.MaxCapacity})   |   [F] Conducir carretilla{thermalUpgradeTag}");
+                }
+                else if (_currentSnowLoad > 0 && !hoveredWheelbarrow.HasCapacity)
+                {
+                    FactoryEvents.RaisePromptChanged(
+                        $"¡Carretilla llena ({hoveredWheelbarrow.CurrentLoad}/{hoveredWheelbarrow.MaxCapacity})!   |   [F] Conducir hacia la hoguera");
+                }
+                else
+                {
+                    FactoryEvents.RaisePromptChanged(
+                        $"[F / E] Conducir carretilla ({hoveredWheelbarrow.CurrentLoad}/{hoveredWheelbarrow.MaxCapacity})   |   Carga nieve con la pala y échala dentro");
+                }
             }
             else if (hoveredPile != null && (hoveredPile.HasSnow || infiniteTestingMode))
             {
@@ -260,31 +321,37 @@ namespace SnowFactory.Gameplay
                 if (infiniteTestingMode)
                 {
                     FactoryEvents.RaisePromptChanged(
-                        $"[{layerDesc}]{hardnessWarning} — Mantén Clic Izq para excavar ({_currentSnowLoad} acum.){thermalUpgradeTag}");
+                        $"[{layerDesc}]{hardnessWarning} — Mantén Clic Izq para excavar ({_currentSnowLoad} acum.){driveTag}{thermalUpgradeTag}");
                 }
                 else if (_currentSnowLoad < maxSnowCapacity)
                 {
                     FactoryEvents.RaisePromptChanged(
-                        $"[Clic Izq / E] Excavar {layerDesc}{hardnessWarning} ({_currentSnowLoad}/{maxSnowCapacity} en pala){thermalUpgradeTag}");
+                        $"[Clic Izq / E] Excavar {layerDesc}{hardnessWarning} ({_currentSnowLoad}/{maxSnowCapacity} en pala){driveTag}{thermalUpgradeTag}");
                 }
                 else
                 {
                     FactoryEvents.RaisePromptChanged(
-                        $"¡Pala llena ({_currentSnowLoad}/{maxSnowCapacity})! Apunta a la chimenea para lanzar la nieve al fuego{testTag}");
+                        $"¡Pala llena ({_currentSnowLoad}/{maxSnowCapacity})! Échala a la carretilla o a la chimenea{driveTag}{testTag}");
                 }
             }
             else if (_currentSnowLoad > 0)
             {
                 FactoryEvents.RaisePromptChanged(
-                    $"Pala con {_currentSnowLoad}/{(infiniteTestingMode ? 999 : maxSnowCapacity)} (Valor x{(float)Mathf.Max(1, _accumulatedValueUnits) / _currentSnowLoad:F1}) — Apunta a la chimenea{thermalUpgradeTag}{testTag}");
+                    $"Pala con {_currentSnowLoad}/{(infiniteTestingMode ? 999 : maxSnowCapacity)} (Valor x{(float)Mathf.Max(1, _accumulatedValueUnits) / _currentSnowLoad:F1}) — Apunta a la carretilla o chimenea{driveTag}{thermalUpgradeTag}{testTag}");
             }
             else
             {
                 FactoryEvents.RaisePromptChanged(
-                    $"Apunta a la nieve (0/{maxSnowCapacity})   |   [U] Pala Ancha ({nextUpgradeCost})   |   [T] Filo Térmico Nv.{_thermalEdgeLevel}   |   [R] Nevada{testTag}");
+                    $"Apunta a la nieve (0/{maxSnowCapacity})   |   [U] Pala Ancha ({nextUpgradeCost})   |   [T] Filo Térmico Nv.{_thermalEdgeLevel}{driveTag}   |   [R] Nevada{testTag}");
             }
 
             if (Cursor.lockState != CursorLockMode.Locked) return;
+
+            if (Keyboard.current != null && Keyboard.current.fKey.wasPressedThisFrame && nearbyWheelbarrow != null && _firstPersonController != null)
+            {
+                nearbyWheelbarrow.EnterDriving(_firstPersonController, this);
+                return;
+            }
 
             bool singlePress = (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame) ||
                                (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame);
@@ -311,7 +378,44 @@ namespace SnowFactory.Gameplay
                 return;
             }
 
-            // Priority 2: Scoop snow from the pile — carve wider crater and launch a chunk from hit.point onto the blade!
+            // Priority 2: Pour shovel load into parked wheelbarrow OR mount it when shovel is empty
+            if (hoveredWheelbarrow != null && singlePress)
+            {
+                if (_currentSnowLoad > 0)
+                {
+                    int loadBefore = _currentSnowLoad;
+                    int totalValBefore = Mathf.Max(loadBefore, _accumulatedValueUnits);
+                    if (hoveredWheelbarrow.TryReceiveFromShovel(loadBefore, totalValBefore, out int acceptedCount) && acceptedCount > 0)
+                    {
+                        int transferredVal = acceptedCount >= loadBefore
+                            ? totalValBefore
+                            : Mathf.Max(acceptedCount, Mathf.RoundToInt(totalValBefore * ((float)acceptedCount / loadBefore)));
+
+                        _currentSnowLoad = Mathf.Max(0, _currentSnowLoad - acceptedCount);
+                        _accumulatedValueUnits = Mathf.Max(0, _accumulatedValueUnits - transferredVal);
+                        _swingAnimTimer = 0.34f;
+                        RefreshBladeClumpBed();
+                        FactoryEvents.RaiseShovelLoadChanged(_currentSnowLoad, infiniteTestingMode ? 999 : maxSnowCapacity);
+
+                        SpawnPourChunksToWheelbarrow(hoveredWheelbarrow, acceptedCount);
+                        FactoryEvents.RaiseStatusMessage(
+                            $"Cargadas +{acceptedCount} palada(s) en la carretilla ({hoveredWheelbarrow.CurrentLoad}/{hoveredWheelbarrow.MaxCapacity}).");
+                    }
+                    else
+                    {
+                        FactoryEvents.RaiseStatusMessage(
+                            $"¡La carretilla ya está llena ({hoveredWheelbarrow.CurrentLoad}/{hoveredWheelbarrow.MaxCapacity})! Pulsa [F] para llevarla a la hoguera.");
+                    }
+                }
+                else if (_firstPersonController != null)
+                {
+                    hoveredWheelbarrow.EnterDriving(_firstPersonController, this);
+                }
+
+                return;
+            }
+
+            // Priority 3: Scoop snow from the pile — carve wider crater and launch a chunk from hit.point onto the blade!
             if (hoveredPile != null && (hoveredPile.HasSnow || infiniteTestingMode))
             {
                 if (!infiniteTestingMode && _currentSnowLoad >= maxSnowCapacity)
@@ -397,6 +501,93 @@ namespace SnowFactory.Gameplay
                 ArcHeight = 0.18f,
                 IsScoopInward = true
             });
+        }
+
+        private void UpdateDrivingWheelbarrowInteraction()
+        {
+            if (_drivingWheelbarrow == null) return;
+
+            bool nearFire = _drivingWheelbarrow.CanDumpAtFireplace(out FireplaceHearth hearth);
+            int load = _drivingWheelbarrow.CurrentLoad;
+            int cap = _drivingWheelbarrow.MaxCapacity;
+
+            if (nearFire && load > 0)
+            {
+                float avgMult = (float)Mathf.Max(1, _drivingWheelbarrow.AccumulatedValueUnits) / load;
+                FactoryEvents.RaisePromptChanged(
+                    $"[Clic Izq / E] Volcar {load} palada(s) en la hoguera (Valor x{avgMult:F1})   |   [F] Aparcar carretilla");
+            }
+            else if (load > 0)
+            {
+                FactoryEvents.RaisePromptChanged(
+                    $"Carretilla cargada ({load}/{cap}) — Llévala junto a la hoguera para volcar   |   [WASD + Ratón] Conducir   |   [Shift] Turbo   |   [F] Aparcar");
+            }
+            else
+            {
+                FactoryEvents.RaisePromptChanged(
+                    $"Conduciendo carretilla (0/{cap}) — Acércate a la nieve y pulsa [F] para bajar y cargarla   |   [WASD + Ratón] Conducir   |   [Shift] Turbo");
+            }
+
+            if (Cursor.lockState != CursorLockMode.Locked) return;
+
+            if (Keyboard.current != null && Keyboard.current.fKey.wasPressedThisFrame)
+            {
+                _drivingWheelbarrow.ExitDriving();
+                return;
+            }
+
+            bool dumpPressed = (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame) ||
+                               (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame);
+
+            if (dumpPressed && nearFire && load > 0)
+            {
+                _drivingWheelbarrow.TryDumpIntoFireplace(hearth);
+            }
+        }
+
+        private WheelbarrowController FindNearestWheelbarrow(float maxDistance)
+        {
+            WheelbarrowController wb = Object.FindFirstObjectByType<WheelbarrowController>();
+            if (wb == null) return null;
+
+            Vector3 pPos = transform.position;
+            Vector3 wPos = wb.transform.position;
+            float distHoriz = Vector2.Distance(new Vector2(pPos.x, pPos.z), new Vector2(wPos.x, wPos.z));
+            return distHoriz <= maxDistance ? wb : null;
+        }
+
+        private void SpawnPourChunksToWheelbarrow(WheelbarrowController wb, int pouredCount)
+        {
+            if (wb == null) return;
+            Vector3 startPos = scoopHead != null ? scoopHead.position : transform.position + transform.forward * 0.6f;
+            Vector3 targetPos = wb.GetTrayReceiveWorldPoint();
+
+            int chunkCount = Mathf.Clamp(pouredCount, 1, 5);
+            for (int i = 0; i < chunkCount; i++)
+            {
+                Vector3 jitter = new Vector3(
+                    Random.Range(-0.14f, 0.14f),
+                    Random.Range(0.0f, 0.08f),
+                    Random.Range(-0.14f, 0.14f));
+
+                GameObject chunk = CreateFlyingSnowSphere(new Vector3(0.18f, 0.085f, 0.17f));
+                chunk.transform.position = startPos + jitter * 0.25f;
+
+                _flyingChunks.Add(new FlyingSnowChunk
+                {
+                    ChunkTransform = chunk.transform,
+                    FollowTarget = null,
+                    StartWorldPos = chunk.transform.position,
+                    EndWorldPos = targetPos + jitter,
+                    Elapsed = -i * 0.025f,
+                    Duration = 0.22f,
+                    ArcHeight = 0.25f + i * 0.03f,
+                    IsScoopInward = false,
+                    TargetFireplace = null,
+                    DeliveredScoopReward = 0,
+                    DeliveredValueUnits = 0
+                });
+            }
         }
 
         private void SpawnThrowChunksToFireplace(FireplaceHearth fireplace, int deliveredScoops, int deliveredValueUnits)
@@ -661,7 +852,7 @@ namespace SnowFactory.Gameplay
 
         private void AnimateShovelSwing()
         {
-            if (shovelPivot == null) return;
+            if (_drivingWheelbarrow != null || shovelPivot == null) return;
 
             if (_swingAnimTimer > 0f)
             {

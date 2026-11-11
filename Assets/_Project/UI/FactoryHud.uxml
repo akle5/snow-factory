@@ -2,8 +2,8 @@
     <ui:Style src="FactoryHud.uss" />
     <ui:VisualElement name="hudRoot" class="hud-root" picking-mode="Ignore">
         <ui:VisualElement name="topCounterPanel" class="top-counter-panel" picking-mode="Ignore">
-            <ui:Label name="snowBurnedLabel" text="MONEDAS DE CALOR: 0   |   PALA: 0/3   |   FILO TÉRMICO: Nv.1   |   FUNDIDAS: 0" class="counter-label" picking-mode="Ignore" />
-            <ui:Label name="statusLabel" text="[Clic Izq / E] Excavar / Echar al Fuego   |   [U] Ensanchar Pala   |   [T] Filo Térmico (Corta Hielo/Glaciar)   |   [R] Nevada   |   [I] Test" class="status-label" picking-mode="Ignore" />
+            <ui:Label name="snowBurnedLabel" text="MONEDAS DE CALOR: 0   |   PALA: 0/3   |   CARRETILLA: 0/24   |   FILO TÉRMICO: Nv.1   |   FUNDIDAS: 0" class="counter-label" picking-mode="Ignore" />
+            <ui:Label name="statusLabel" text="[Clic Izq / E] Excavar / Echar al Fuego   |   [F] Carretilla   |   [U] Ensanchar Pala   |   [T] Filo Térmico   |   [R] Nevada   |   [I] Test" class="status-label" picking-mode="Ignore" />
         </ui:VisualElement>
         <ui:VisualElement name="centerReticleLayer" class="center-reticle-layer" picking-mode="Ignore">
             <ui:VisualElement name="crosshairDot" class="crosshair-dot" picking-mode="Ignore" />
