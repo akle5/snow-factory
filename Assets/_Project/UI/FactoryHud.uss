@@ -1,0 +1,88 @@
+:root {
+    --color-hud-bg: rgba(18, 28, 42, 0.86);
+    --color-hud-border: rgba(94, 168, 232, 0.35);
+    --color-accent-gold: #FFB838;
+    --color-text-light: #D8E6F2;
+    --color-prompt-warm: #FFE699;
+    --color-crosshair: rgba(255, 255, 255, 0.92);
+}
+
+.hud-root {
+    flex-grow: 1;
+    justify-content: space-between;
+}
+
+.top-counter-panel {
+    align-self: flex-start;
+    margin-top: 18px;
+    margin-left: 20px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    padding-left: 18px;
+    padding-right: 18px;
+    background-color: var(--color-hud-bg);
+    border-top-width: 1px;
+    border-bottom-width: 1px;
+    border-left-width: 3px;
+    border-right-width: 1px;
+    border-top-color: var(--color-hud-border);
+    border-bottom-color: var(--color-hud-border);
+    border-left-color: var(--color-accent-gold);
+    border-right-color: var(--color-hud-border);
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    border-bottom-left-radius: 6px;
+    border-bottom-right-radius: 6px;
+}
+
+.counter-label {
+    color: var(--color-accent-gold);
+    font-size: 17px;
+    -unity-font-style: bold;
+    margin-bottom: 4px;
+    padding-left: 0;
+    padding-right: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+.status-label {
+    color: var(--color-text-light);
+    font-size: 13px;
+    white-space: normal;
+    max-width: 580px;
+    padding-left: 0;
+    padding-right: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+.center-reticle-layer {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    align-items: center;
+    justify-content: center;
+}
+
+.crosshair-dot {
+    width: 6px;
+    height: 6px;
+    background-color: var(--color-crosshair);
+    border-top-left-radius: 3px;
+    border-top-right-radius: 3px;
+    border-bottom-left-radius: 3px;
+    border-bottom-right-radius: 3px;
+}
+
+.prompt-label {
+    margin-top: 28px;
+    color: var(--color-prompt-warm);
+    font-size: 15px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+    white-space: normal;
+    max-width: 680px;
+}

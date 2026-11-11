@@ -1,0 +1,13 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:Style src="FactoryHud.uss" />
+    <ui:VisualElement name="hudRoot" class="hud-root" picking-mode="Ignore">
+        <ui:VisualElement name="topCounterPanel" class="top-counter-panel" picking-mode="Ignore">
+            <ui:Label name="snowBurnedLabel" text="MONEDAS DE CALOR: 0   |   PALA: 0/3   |   FUNDIDAS: 0" class="counter-label" picking-mode="Ignore" />
+            <ui:Label name="statusLabel" text="[Clic Izq / E] Apilar Nieve / Echar al Fuego   |   [U] Mejorar Pala   |   [R] Nueva Nevada   |   [I] Pala Infinita (Test)" class="status-label" picking-mode="Ignore" />
+        </ui:VisualElement>
+        <ui:VisualElement name="centerReticleLayer" class="center-reticle-layer" picking-mode="Ignore">
+            <ui:VisualElement name="crosshairDot" class="crosshair-dot" picking-mode="Ignore" />
+            <ui:Label name="interactionPromptLabel" text="Apunta al montón de nieve para excavar (0/3)   |   [U] Ensanchar Pala (30 Monedas)   |   [R] Nueva Nevada   |   [I] Pala Infinita (Test)" class="prompt-label" picking-mode="Ignore" />
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

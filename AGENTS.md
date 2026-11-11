@@ -52,13 +52,14 @@ El Unity Hub del usuario se ejecuta como paquete MSIX (`WindowsApps`), por lo qu
 - `com.unity.inputsystem` (`1.20.1`)
 - `com.unity.cinemachine` (`3.1.7`)
 - `com.unity.ai.navigation` (`2.0.16`)
-- `com.unity.ugui` (`2.0.0` - Canvas + UI)
+- `com.unity.modules.uielements` (UI Toolkit `UIDocument` + `.uxml` / `.uss` — sin rectángulos gigantes `Canvas` en el Scene View 3D)
 - `com.unity.pipeline` (`0.10.0-exp.1`)
 
 ### Estructura Modular (`Assets/_Project/`)
 - `Assets/_Project/Scripts/Core/` — `Palette.cs` (colores base y emisivos del entorno, pala y chimenea), `FactoryEvents.cs` (eventos desacoplados del HUD).
 - `Assets/_Project/Scripts/Gameplay/` — `FirstPersonController.cs`, `ShovelController.cs`, `SnowPile.cs`, `FireplaceHearth.cs`.
-- `Assets/_Project/Scripts/UI/` — `FactoryHudController.cs` (contador de paladas en la chimenea y avisos contextuales en pantalla).
+- `Assets/_Project/Scripts/UI/` — `FactoryHudController.cs` (controlador UI Toolkit enlazado a `UIDocument`).
+- `Assets/_Project/UI/` — `FactoryHud.uxml`, `FactoryHud.uss`, `FactoryHudPanelSettings.asset`.
 - `Assets/_Project/Scenes/` — `Boot.unity`, `MainGame.unity`, `TestSandbox.unity`.
 - `Assets/_Project/Prefabs/`, `Materials/`, `Audio/`, `Settings/`.
 
@@ -162,3 +163,6 @@ El Unity Hub del usuario se ejecuta como paquete MSIX (`WindowsApps`), por lo qu
       - En `SnowPile.RecalculateFlatNormals`: si tras aplastar una cueva o voladizo la normal en espacio de mundo apunta hacia abajo (`worldNormal.y < 0f`), se invierte automáticamente (`faceNormal = -faceNormal`) para que ninguna cara colapsada se vuelva negra jamás.
       - Se bajó `minWorldFloorY` a `-0.06f` (`6 cm` por debajo de `SnowYardFloor`) para que al excavar hasta el fondo toda la malla quede limpiamente enterrada bajo la nieve del suelo sin *z-fighting*.
       - En `ShovelController.UpdateHoverAndInteract`: se reemplazó `Physics.Raycast` por `Physics.RaycastAll`, priorizando cualquier `SnowPile` en el rayo aunque esté a ras de `SnowYardFloor`.
+- **Migración del HUD de uGUI (`Canvas` `Screen Space - Overlay`) a UI Toolkit (`UIDocument`)**:
+  - Se eliminó el antiguo `Canvas` de uGUI que proyectaba un rectángulo gigante de `1920x1080` metros en mitad de la pestaña `Scene` 3D.
+  - Se crearon [`FactoryHud.uxml`](file:///D:/Unity%20Antigravity/Snow%20Factory/Assets/_Project/UI/FactoryHud.uxml), [`FactoryHud.uss`](file:///D:/Unity%20Antigravity/Snow%20Factory/Assets/_Project/UI/FactoryHud.uss) y `FactoryHudPanelSettings.asset` en `Assets/_Project/UI/`, y se actualizó [`FactoryHudController.cs`](file:///D:/Unity%20Antigravity/Snow%20Factory/Assets/_Project/Scripts/UI/FactoryHudController.cs) para usar `UIDocument` (`UnityEngine.UIElements`), dejando la vista `Scene` 3D 100% limpia de cajas de interfaz.
