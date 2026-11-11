@@ -60,28 +60,28 @@ namespace SnowFactory.Gameplay
         // Pre-computed organic positions inside the concave pan (rear-to-front, left-to-right, low profile!)
         private static readonly Vector3[] ClumpLocalOffsets =
         {
-            new Vector3(-0.06f, 0.032f, -0.05f),
-            new Vector3( 0.06f, 0.034f, -0.04f),
-            new Vector3( 0.00f, 0.030f,  0.05f),
-            new Vector3(-0.08f, 0.035f,  0.04f),
-            new Vector3( 0.08f, 0.035f,  0.04f),
-            new Vector3( 0.00f, 0.056f, -0.02f),
-            new Vector3(-0.05f, 0.054f,  0.02f),
-            new Vector3( 0.05f, 0.054f,  0.01f),
-            new Vector3( 0.00f, 0.048f,  0.09f)
+            new Vector3(-0.07f, 0.015f, -0.01f),
+            new Vector3( 0.07f, 0.016f,  0.00f),
+            new Vector3( 0.00f, 0.014f,  0.06f),
+            new Vector3(-0.09f, 0.018f,  0.06f),
+            new Vector3( 0.09f, 0.018f,  0.06f),
+            new Vector3( 0.00f, 0.036f,  0.02f),
+            new Vector3(-0.06f, 0.034f,  0.05f),
+            new Vector3( 0.06f, 0.034f,  0.05f),
+            new Vector3( 0.00f, 0.028f,  0.10f)
         };
 
         private static readonly Vector3[] ClumpLocalScales =
         {
-            new Vector3(0.16f, 0.065f, 0.14f),
-            new Vector3(0.15f, 0.068f, 0.15f),
-            new Vector3(0.17f, 0.060f, 0.14f),
-            new Vector3(0.14f, 0.062f, 0.13f),
-            new Vector3(0.14f, 0.062f, 0.13f),
             new Vector3(0.18f, 0.065f, 0.16f),
-            new Vector3(0.15f, 0.060f, 0.14f),
-            new Vector3(0.15f, 0.060f, 0.14f),
-            new Vector3(0.16f, 0.055f, 0.12f)
+            new Vector3(0.17f, 0.068f, 0.16f),
+            new Vector3(0.19f, 0.060f, 0.16f),
+            new Vector3(0.16f, 0.062f, 0.15f),
+            new Vector3(0.16f, 0.062f, 0.15f),
+            new Vector3(0.20f, 0.065f, 0.17f),
+            new Vector3(0.17f, 0.060f, 0.15f),
+            new Vector3(0.17f, 0.060f, 0.15f),
+            new Vector3(0.18f, 0.055f, 0.14f)
         };
 
         public int CurrentSnowLoad => _currentSnowLoad;
@@ -129,12 +129,25 @@ namespace SnowFactory.Gameplay
             if (heldSnowVisual != null)
             {
                 MeshRenderer mr = heldSnowVisual.GetComponent<MeshRenderer>();
-                if (mr != null)
+                if (mr != null && mr.sharedMaterial != null)
                 {
                     _snowMaterial = mr.sharedMaterial;
                 }
                 // Hide the old single sphere so it never turns into an egg
                 heldSnowVisual.SetActive(false);
+            }
+
+            if (_snowMaterial == null)
+            {
+                SnowPile anyPile = Object.FindFirstObjectByType<SnowPile>();
+                if (anyPile != null)
+                {
+                    MeshRenderer pileMr = anyPile.GetComponent<MeshRenderer>();
+                    if (pileMr != null)
+                    {
+                        _snowMaterial = pileMr.sharedMaterial;
+                    }
+                }
             }
         }
 

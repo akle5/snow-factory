@@ -1,0 +1,11 @@
+Model Information:
+* title:	Shovel snow
+* source:	https://sketchfab.com/3d-models/shovel-snow-479ed5a0947b48d4b9c978f2f0082714
+* author:	Klimuk Sergey (https://sketchfab.com/uncle.mid)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Shovel snow" (https://sketchfab.com/3d-models/shovel-snow-479ed5a0947b48d4b9c978f2f0082714) by Klimuk Sergey (https://sketchfab.com/uncle.mid) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
