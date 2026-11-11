@@ -10,6 +10,7 @@ namespace SnowFactory.Core
         public static event Action<int> OnSnowBurnedCountChanged;
         public static event Action<int> OnHeatPointsChanged;
         public static event Action<int, int> OnShovelLoadChanged;
+        public static event Action<int> OnThermalEdgeLevelChanged;
         public static event Action<string> OnPromptChanged;
         public static event Action<string> OnStatusMessage;
 
@@ -26,6 +27,11 @@ namespace SnowFactory.Core
         public static void RaiseShovelLoadChanged(int currentLoad, int maxCapacity)
         {
             OnShovelLoadChanged?.Invoke(currentLoad, maxCapacity);
+        }
+
+        public static void RaiseThermalEdgeLevelChanged(int thermalLevel)
+        {
+            OnThermalEdgeLevelChanged?.Invoke(thermalLevel);
         }
 
         public static void RaisePromptChanged(string prompt)

@@ -85,22 +85,23 @@ namespace SnowFactory.Gameplay
 
         /// <summary>
         /// Deposits one or multiple accumulated scoops of snow at once into the fireplace.
-        /// Grants base coins + batch bonus when delivering multiple scoops together.
+        /// Grants base coins * layerValueMultiplier + batch bonus when delivering multiple scoops together.
         /// </summary>
-        public int DepositSnow(int scoopCount = 1)
+        public int DepositSnow(int scoopCount = 1, int totalBaseValueUnits = 0)
         {
             int count = Mathf.Max(1, scoopCount);
+            int effectiveUnits = totalBaseValueUnits > 0 ? totalBaseValueUnits : count;
             _totalSnowDeposited += count;
 
-            // Calculate reward: 10 pts per scoop + bonus for stacking multiple scoops at once
-            int baseEarned = count * basePointsPerScoop;
+            // Calculate reward: 10 pts per value unit (Soft Snow = 1x, Compact Ice = 2x, Glacier Core = 3x) + stack bonus
+            int baseEarned = effectiveUnits * basePointsPerScoop;
             int batchBonus = count > 1 ? (count - 1) * count * multiScoopBonusPerExtra / 2 : 0;
             int totalEarned = baseEarned + batchBonus;
 
             _heatPoints += totalEarned;
 
             _reactionTimer = Mathf.Clamp(0.45f + count * 0.12f, 0.45f, 1.4f);
-            _reactionScaleBoost = Mathf.Clamp(count * 0.35f, 0.35f, 2.2f);
+            _reactionScaleBoost = Mathf.Clamp(effectiveUnits * 0.35f, 0.35f, 2.6f);
 
             if (steamBurstParticles != null)
             {
@@ -110,15 +111,19 @@ namespace SnowFactory.Gameplay
             FactoryEvents.RaiseSnowBurnedCountChanged(_totalSnowDeposited);
             FactoryEvents.RaiseHeatPointsChanged(_heatPoints);
 
+            string glacierTag = effectiveUnits > count
+                ? $" [¡Incluye Hielo/Glaciar x{(float)effectiveUnits / count:F1}!]"
+                : string.Empty;
+
             if (batchBonus > 0)
             {
                 FactoryEvents.RaiseStatusMessage(
-                    $"¡+{totalEarned} Monedas de Calor! ({count} paladas fundidas de golpe, incluye +{batchBonus} Bonus de Pila)");
+                    $"¡+{totalEarned} Monedas de Calor! ({count} paladas fundidas{glacierTag}, +{batchBonus} Bonus de Pila)");
             }
             else
             {
                 FactoryEvents.RaiseStatusMessage(
-                    $"¡+{totalEarned} Monedas de Calor! (1 palada fundida en la chimenea)");
+                    $"¡+{totalEarned} Monedas de Calor! (1 palada fundida en la chimenea{glacierTag})");
             }
 
             return totalEarned;

@@ -43,6 +43,7 @@ namespace SnowFactory.Gameplay
         private Mesh _deformableMesh;
         private Vector3[] _vertices;
         private Vector3[] _initialLocalVertices;
+        private float[] _initialWorldY;
         private int[] _triangles;
         private Color[] _vertexColors;
         private List<int>[] _vertexNeighbors;
@@ -52,6 +53,8 @@ namespace SnowFactory.Gameplay
         public int RemainingScoops => _remainingScoops;
         public int MaxScoops => maxScoops;
         public bool HasSnow => _remainingScoops > 0;
+        public int LastScoopTier { get; private set; }
+        public int LastScoopRewardMultiplier { get; private set; } = 1;
 
         private void Awake()
         {
@@ -125,16 +128,31 @@ namespace SnowFactory.Gameplay
             _triangles = _deformableMesh.triangles;
             BuildTopologicalNeighbors(_vertices.Length, _triangles);
 
-            _vertexColors = _deformableMesh.colors;
-            if (_vertexColors == null || _vertexColors.Length != _vertices.Length)
+            Matrix4x4 l2w = transform.localToWorldMatrix;
+            _initialWorldY = new float[_vertices.Length];
+            _vertexColors = new Color[_vertices.Length];
+
+            for (int i = 0; i < _vertices.Length; i++)
             {
-                _vertexColors = new Color[_vertices.Length];
-                for (int i = 0; i < _vertexColors.Length; i++)
+                float wy = l2w.MultiplyPoint3x4(_vertices[i]).y;
+                _initialWorldY[i] = wy;
+
+                // Paint natural alpine ice peaks (Y > 4.2m) with Compacted Frost Ice (G = 0.45) or Glacier Core (G = 0.05)
+                // so the player immediately sees the icy blue strata on the mountain peaks!
+                float layerG = 1.0f;
+                if (wy > 6.8f)
                 {
-                    _vertexColors[i] = Color.white;
+                    layerG = 0.05f;
                 }
-                _deformableMesh.colors = _vertexColors;
+                else if (wy > 4.2f)
+                {
+                    float t = Mathf.InverseLerp(4.2f, 6.8f, wy);
+                    layerG = Mathf.Lerp(0.85f, 0.25f, t);
+                }
+
+                _vertexColors[i] = new Color(1.0f, layerG, 1.0f, 1.0f);
             }
+            _deformableMesh.colors = _vertexColors;
 
             _meshFilter.sharedMesh = _deformableMesh;
 
@@ -297,12 +315,59 @@ namespace SnowFactory.Gameplay
             InitializeDeformableMesh();
         }
 
-        public bool TryScoopAtPoint(Vector3 worldHitPoint, float radiusMultiplier = 1.0f, bool ignoreDepletion = false)
+        public string GetLayerInfoAtWorldPoint(Vector3 worldHitPoint, out int layerTier, out int coinMultiplier)
+        {
+            if (!useExistingMesh || _vertices == null || _vertexColors == null)
+            {
+                layerTier = 0;
+                coinMultiplier = 1;
+                return "Nieve Polvo (Blanda · x1)";
+            }
+
+            // Sample closest vertex near worldHitPoint to inspect its exposed hardness layer (vertexColor.g)
+            Matrix4x4 l2w = transform.localToWorldMatrix;
+            float bestDistSq = float.MaxValue;
+            float sampledG = 1.0f;
+
+            for (int i = 0; i < _vertices.Length; i += 3)
+            {
+                Vector3 vw = l2w.MultiplyPoint3x4(_vertices[i]);
+                float dSq = (vw - worldHitPoint).sqrMagnitude;
+                if (dSq < bestDistSq)
+                {
+                    bestDistSq = dSq;
+                    sampledG = _vertexColors[i].g;
+                }
+            }
+
+            if (sampledG < 0.32f)
+            {
+                layerTier = 2;
+                coinMultiplier = 3;
+                return "Núcleo Glaciar Azul (Dureza Alta · x3 Monedas)";
+            }
+            if (sampledG < 0.72f)
+            {
+                layerTier = 1;
+                coinMultiplier = 2;
+                return "Hielo Compacto (Dureza Media · x2 Monedas)";
+            }
+
+            layerTier = 0;
+            coinMultiplier = 1;
+            return "Nieve Polvo Superficial (Blanda · x1 Moneda)";
+        }
+
+        public bool TryScoopAtPoint(Vector3 worldHitPoint, float radiusMultiplier = 1.0f, bool ignoreDepletion = false, int thermalEdgeLevel = 1)
         {
             if (!ignoreDepletion && _remainingScoops <= 0)
             {
                 return false;
             }
+
+            GetLayerInfoAtWorldPoint(worldHitPoint, out int hitTier, out int rewardMult);
+            LastScoopTier = hitTier;
+            LastScoopRewardMultiplier = rewardMult;
 
             if (!ignoreDepletion)
             {
@@ -316,7 +381,7 @@ namespace SnowFactory.Gameplay
                 scoopBurstParticles.Play();
             }
 
-            CarveCraterAtWorldPoint(worldHitPoint, radiusMultiplier);
+            CarveCraterAtWorldPoint(worldHitPoint, radiusMultiplier, thermalEdgeLevel);
 
             if (shrinkOverallScaleOnScoop && !ignoreDepletion)
             {
@@ -325,17 +390,16 @@ namespace SnowFactory.Gameplay
             return true;
         }
 
-        private void CarveCraterAtWorldPoint(Vector3 worldHitPoint, float radiusMultiplier)
+        private void CarveCraterAtWorldPoint(Vector3 worldHitPoint, float radiusMultiplier, int thermalEdgeLevel = 1)
         {
             if (_deformableMesh == null || _vertices == null) return;
 
             if (useExistingMesh)
             {
                 // World-space excavation for arbitrary rotated/scaled 3D assets (e.g. Blender Z-up Sketchfab island).
-                // Handles tall mountain peaks & vertical ice/snow pillars cleanly:
-                // 1) Never pushes vertices upward above their current/original height (prevents infinite-mode obelisk extrusions).
-                // 2) Collapses overhanging peak/pillar vertices above the hit point when digging into the base or side of a peak.
-                // 3) Enforces a natural angle-of-repose slope around the crater so razor-thin spikes cannot survive.
+                // Handles 3 Hardness Layers (Soft White Snow -> Compact Light-Blue Ice -> Deep Blue Glacier Core):
+                // - Basic Shovel (Thermal Edge Lv.1) digs Soft Snow at 100%, Compact Ice at 24% (barely dents it!), and Glacier Core at 12%.
+                // - Upgrading Thermal Edge [T] cuts through Compact Ice and Glacier Core effortlessly!
                 float worldRadius = craterRadius * Mathf.Clamp(radiusMultiplier, 0.8f, 2.2f);
                 float collapseRadius = worldRadius * 1.55f;
                 float sqrCollapseRadius = collapseRadius * collapseRadius;
@@ -362,6 +426,27 @@ namespace SnowFactory.Gameplay
                         continue;
                     }
 
+                    // Determine current vertex hardness from its G channel (1.0 = Soft Snow, 0.5 = Compact Ice, 0.0 = Glacier Core)
+                    float currentLayerG = _vertexColors[i].g;
+                    float hardnessResistance = 1.0f;
+                    if (currentLayerG < 0.32f)
+                    {
+                        // Tier 2: Deep Glacier Core
+                        hardnessResistance = thermalEdgeLevel >= 3 ? 1.15f : (thermalEdgeLevel == 2 ? 0.50f : 0.14f);
+                    }
+                    else if (currentLayerG < 0.72f)
+                    {
+                        // Tier 1: Compacted Light-Blue Ice (Mountain Peaks & Mid Layer)
+                        hardnessResistance = thermalEdgeLevel >= 2 ? 1.10f : 0.24f;
+                    }
+                    else
+                    {
+                        // Tier 0: Soft White Surface Snow
+                        hardnessResistance = 1.0f + (thermalEdgeLevel - 1) * 0.20f;
+                    }
+
+                    float effectiveCraterDepth = craterDepth * hardnessResistance;
+
                     float dist = Mathf.Sqrt(horizDistSq);
                     float newWorldY = vWorld.y;
                     float aoDelta = 0f;
@@ -370,7 +455,7 @@ namespace SnowFactory.Gameplay
                     {
                         float normalized = dist / worldRadius;
                         float falloff = Mathf.Cos(normalized * Mathf.PI * 0.5f);
-                        float depression = falloff * falloff * craterDepth;
+                        float depression = falloff * falloff * effectiveCraterDepth;
 
                         if (dy <= worldRadius * 0.65f)
                         {
@@ -381,9 +466,8 @@ namespace SnowFactory.Gameplay
                         else
                         {
                             // Overhang / Pillar Collapse: vertex is high above the shovel hit (e.g. mountain peak or ice pillar).
-                            // Digging the base or flank of a peak collapses the upper column downward smoothly!
                             float targetCollapsedY = worldHitPoint.y - depression * 0.5f + dist * 0.85f;
-                            float collapsePull = Mathf.Max(depression * 1.65f, (vWorld.y - targetCollapsedY) * (0.58f * falloff + 0.25f));
+                            float collapsePull = Mathf.Max(depression * 1.65f, (vWorld.y - targetCollapsedY) * (0.58f * falloff + 0.25f) * hardnessResistance);
                             newWorldY = vWorld.y - collapsePull;
                             aoDelta = falloff * 0.30f;
                         }
@@ -391,13 +475,12 @@ namespace SnowFactory.Gameplay
                     else
                     {
                         // Outer stability ring (worldRadius .. 1.55 * worldRadius):
-                        // Enforce a natural snow slope (angle of repose) so adjacent peaks/walls don't form vertical needles
                         float outerT = 1f - ((dist - worldRadius) / (collapseRadius - worldRadius));
                         float maxStableY = worldHitPoint.y + (dist - worldRadius * 0.35f) * 1.35f;
                         if (vWorld.y > maxStableY)
                         {
                             float excess = vWorld.y - maxStableY;
-                            newWorldY = vWorld.y - Mathf.Min(excess, craterDepth * 1.35f) * outerT * 0.65f;
+                            newWorldY = vWorld.y - Mathf.Min(excess, effectiveCraterDepth * 1.35f) * outerT * 0.65f;
                             aoDelta = outerT * 0.15f;
                         }
                     }
@@ -405,9 +488,12 @@ namespace SnowFactory.Gameplay
                     // Clamp to ground floor and ensure a vertex never rises above its current height
                     newWorldY = Mathf.Clamp(newWorldY, minWorldFloorY, vWorld.y);
 
+                    float origWorldY = (_initialWorldY != null && i < _initialWorldY.Length)
+                        ? _initialWorldY[i]
+                        : vWorld.y;
+
                     if (_initialLocalVertices != null && i < _initialLocalVertices.Length)
                     {
-                        float origWorldY = localToWorld.MultiplyPoint3x4(_initialLocalVertices[i]).y;
                         newWorldY = Mathf.Min(newWorldY, origWorldY);
                     }
 
@@ -416,8 +502,24 @@ namespace SnowFactory.Gameplay
                         vWorld.y = newWorldY;
                         _vertices[i] = worldToLocal.MultiplyPoint3x4(vWorld);
 
+                        // Compute how deep below the original surface this vertex has been excavated:
+                        // - 0.0m .. 1.1m deep -> Soft Snow (1.0) transitioning to Compacted Light-Blue Ice (0.5)
+                        // - 1.1m .. 2.8m+ deep -> Compacted Ice (0.5) transitioning to Deep Glacier Blue Core (0.0)
+                        float dugDepth = Mathf.Max(0f, origWorldY - newWorldY);
+                        float depthLayerG = 1.0f;
+                        if (dugDepth < 1.15f)
+                        {
+                            depthLayerG = Mathf.Lerp(1.0f, 0.50f, dugDepth / 1.15f);
+                        }
+                        else
+                        {
+                            depthLayerG = Mathf.Lerp(0.50f, 0.0f, Mathf.Clamp01((dugDepth - 1.15f) / 1.75f));
+                        }
+
+                        // Preserve natural peak ice if it started icier than current dug depth
+                        float newLayerG = Mathf.Min(currentLayerG, depthLayerG);
                         float currentAo = _vertexColors[i].r;
-                        _vertexColors[i] = new Color(Mathf.Max(0.25f, currentAo - aoDelta), 1f, 1f, 1f);
+                        _vertexColors[i] = new Color(Mathf.Max(0.25f, currentAo - aoDelta), newLayerG, 1f, 1f);
                     }
                 }
 
@@ -474,9 +576,20 @@ namespace SnowFactory.Gameplay
                                     if (cIdx >= 0)
                                     {
                                         List<int> cluster = _weldedVertexClusters[cIdx];
+                                        float minClusterG = _vertexColors[i].g;
+                                        float minClusterR = _vertexColors[i].r;
                                         for (int k = 0; k < cluster.Count; k++)
                                         {
-                                            _vertices[cluster[k]] = newLocal;
+                                            int idx = cluster[k];
+                                            if (_vertexColors[idx].g < minClusterG) minClusterG = _vertexColors[idx].g;
+                                            if (_vertexColors[idx].r < minClusterR) minClusterR = _vertexColors[idx].r;
+                                        }
+                                        Color syncedColor = new Color(minClusterR, minClusterG, 1f, 1f);
+                                        for (int k = 0; k < cluster.Count; k++)
+                                        {
+                                            int idx = cluster[k];
+                                            _vertices[idx] = newLocal;
+                                            _vertexColors[idx] = syncedColor;
                                         }
                                     }
                                 }

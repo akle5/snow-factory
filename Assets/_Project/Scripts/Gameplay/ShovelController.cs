@@ -26,6 +26,7 @@ namespace SnowFactory.Gameplay
             public bool IsScoopInward;
             public FireplaceHearth TargetFireplace;
             public int DeliveredScoopReward;
+            public int DeliveredValueUnits;
         }
 
         [Header("Shovel References")]
@@ -38,10 +39,13 @@ namespace SnowFactory.Gameplay
         [SerializeField] private int maxSnowCapacity = 3;
         [SerializeField] private int upgradeCapacityStep = 2;
         [SerializeField] private int nextUpgradeCost = 30;
+        [SerializeField] private int nextThermalUpgradeCost = 40;
         [SerializeField] private bool infiniteTestingMode;
 
         private int _currentSnowLoad;
+        private int _accumulatedValueUnits;
         private int _bladeUpgradeLevel;
+        private int _thermalEdgeLevel = 1;
         private float _swingAnimTimer;
         private float _continuousDigCooldown;
         private Quaternion _restLocalRotation;
@@ -94,6 +98,7 @@ namespace SnowFactory.Gameplay
         {
             _cachedHearth = Object.FindFirstObjectByType<FireplaceHearth>();
             FactoryEvents.RaiseShovelLoadChanged(_currentSnowLoad, maxSnowCapacity);
+            FactoryEvents.RaiseThermalEdgeLevelChanged(_thermalEdgeLevel);
         }
 
         public void BindShovelVisuals(Transform pivot, GameObject snowChunkOnBlade)
@@ -222,24 +227,32 @@ namespace SnowFactory.Gameplay
                 _continuousDigCooldown -= Time.deltaTime;
             }
 
-            string testTag = infiniteTestingMode ? "   |   [I] MODO INFINITO: ACTIVO (Mantén Clic para excavar)" : "   |   [I] Pala Infinita (Test)";
+            string testTag = infiniteTestingMode ? "   |   [I] MODO INFINITO: ACTIVO" : "   |   [I] Pala Infinita (Test)";
+            string thermalUpgradeTag = _thermalEdgeLevel < 3
+                ? $"   |   [T] Filo Térmico Nv.{_thermalEdgeLevel + 1} ({nextThermalUpgradeCost} Monedas)"
+                : "   |   Filo Térmico MÁX (Nv.3)";
 
             if (hoveredFireplace != null && _currentSnowLoad > 0)
             {
                 FactoryEvents.RaisePromptChanged(
-                    $"[Clic Izq / E] Lanzar {_currentSnowLoad} palada(s) al fuego   |   [U] Pala Ancha Nv.{_bladeUpgradeLevel + 2} ({nextUpgradeCost} Monedas){testTag}");
+                    $"[Clic Izq / E] Lanzar {_currentSnowLoad} palada(s) al fuego (Valor x{(float)Mathf.Max(1, _accumulatedValueUnits) / _currentSnowLoad:F1})   |   [U] Pala Ancha ({nextUpgradeCost}){thermalUpgradeTag}");
             }
             else if (hoveredPile != null && (hoveredPile.HasSnow || infiniteTestingMode))
             {
+                string layerDesc = hoveredPile.GetLayerInfoAtWorldPoint(targetHitPoint, out int layerTier, out int coinMult);
+                string hardnessWarning = (layerTier == 1 && _thermalEdgeLevel < 2)
+                    ? " ⚠️ [¡Dura! Mejora Filo Térmico con T]"
+                    : (layerTier == 2 && _thermalEdgeLevel < 3 ? " ⚠️ [¡Glaciar Duro! Mejora Filo Térmico con T]" : "");
+
                 if (infiniteTestingMode)
                 {
                     FactoryEvents.RaisePromptChanged(
-                        $"[MODO TEST INFINITO] Clic o Mantén Clic Izquierdo para excavar sin límite ({_currentSnowLoad} acumuladas)   |   [I] Desactivar");
+                        $"[{layerDesc}]{hardnessWarning} — Mantén Clic Izq para excavar ({_currentSnowLoad} acum.){thermalUpgradeTag}");
                 }
                 else if (_currentSnowLoad < maxSnowCapacity)
                 {
                     FactoryEvents.RaisePromptChanged(
-                        $"[Clic Izq / E] Excavar nieve ({_currentSnowLoad}/{maxSnowCapacity} en pala) — Quedan {hoveredPile.RemainingScoops} en el montón{testTag}");
+                        $"[Clic Izq / E] Excavar {layerDesc}{hardnessWarning} ({_currentSnowLoad}/{maxSnowCapacity} en pala){thermalUpgradeTag}");
                 }
                 else
                 {
@@ -250,12 +263,12 @@ namespace SnowFactory.Gameplay
             else if (_currentSnowLoad > 0)
             {
                 FactoryEvents.RaisePromptChanged(
-                    $"Pala con {_currentSnowLoad}/{(infiniteTestingMode ? 999 : maxSnowCapacity)} de nieve — Apunta a la chimenea para lanzarla al fuego{testTag}");
+                    $"Pala con {_currentSnowLoad}/{(infiniteTestingMode ? 999 : maxSnowCapacity)} (Valor x{(float)Mathf.Max(1, _accumulatedValueUnits) / _currentSnowLoad:F1}) — Apunta a la chimenea{thermalUpgradeTag}{testTag}");
             }
             else
             {
                 FactoryEvents.RaisePromptChanged(
-                    $"Apunta al montón de nieve para excavar (0/{maxSnowCapacity})   |   [U] Ensanchar Pala ({nextUpgradeCost} Monedas)   |   [R] Nueva Nevada{testTag}");
+                    $"Apunta a la nieve (0/{maxSnowCapacity})   |   [U] Pala Ancha ({nextUpgradeCost})   |   [T] Filo Térmico Nv.{_thermalEdgeLevel}   |   [R] Nevada{testTag}");
             }
 
             if (Cursor.lockState != CursorLockMode.Locked) return;
@@ -274,12 +287,14 @@ namespace SnowFactory.Gameplay
             if (hoveredFireplace != null && _currentSnowLoad > 0 && singlePress)
             {
                 int deliveredCount = _currentSnowLoad;
+                int deliveredValueUnits = Mathf.Max(deliveredCount, _accumulatedValueUnits);
                 _currentSnowLoad = 0;
+                _accumulatedValueUnits = 0;
                 _swingAnimTimer = 0.36f;
                 RefreshBladeClumpBed();
                 FactoryEvents.RaiseShovelLoadChanged(_currentSnowLoad, infiniteTestingMode ? 999 : maxSnowCapacity);
 
-                SpawnThrowChunksToFireplace(hoveredFireplace, deliveredCount);
+                SpawnThrowChunksToFireplace(hoveredFireplace, deliveredCount, deliveredValueUnits);
                 return;
             }
 
@@ -294,8 +309,13 @@ namespace SnowFactory.Gameplay
                 }
 
                 float radiusMult = 1.0f + _bladeUpgradeLevel * 0.22f;
-                if (hoveredPile.TryScoopAtPoint(targetHitPoint, radiusMult, infiniteTestingMode))
+                int effectiveThermalLevel = infiniteTestingMode ? Mathf.Max(_thermalEdgeLevel, 1) : _thermalEdgeLevel;
+
+                if (hoveredPile.TryScoopAtPoint(targetHitPoint, radiusMult, infiniteTestingMode, effectiveThermalLevel))
                 {
+                    int scoopedTier = hoveredPile.LastScoopTier;
+                    int scoopedMultiplier = hoveredPile.LastScoopRewardMultiplier;
+
                     // If the pile is part of a multi-mesh terrain group (e.g. Sketchfab_LowPolySnowIsland with Terrain + Cave submeshes),
                     // also excavate sibling SnowPile meshes around the same world hit point so no rocky/ice sub-mesh remains floating!
                     Transform parentGroup = hoveredPile.transform.parent;
@@ -306,22 +326,37 @@ namespace SnowFactory.Gameplay
                         {
                             if (siblingPiles[s] != hoveredPile)
                             {
-                                siblingPiles[s].TryScoopAtPoint(targetHitPoint, radiusMult, true);
+                                siblingPiles[s].TryScoopAtPoint(targetHitPoint, radiusMult, true, effectiveThermalLevel);
                             }
                         }
                     }
 
                     _currentSnowLoad++;
+                    _accumulatedValueUnits += scoopedMultiplier;
                     _swingAnimTimer = 0.24f;
                     _continuousDigCooldown = 0.11f;
                     FactoryEvents.RaiseShovelLoadChanged(_currentSnowLoad, infiniteTestingMode ? 999 : maxSnowCapacity);
 
                     SpawnScoopChunkFromPile(targetHitPoint);
 
-                    if (!infiniteTestingMode)
+                    if (scoopedTier == 2)
                     {
                         FactoryEvents.RaiseStatusMessage(
-                            $"Nieve recogida en la cuchara: {_currentSnowLoad}/{maxSnowCapacity} (Quedan {hoveredPile.RemainingScoops} en este montón)");
+                            _thermalEdgeLevel < 3
+                                ? $"❄️ ¡Núcleo Glaciar Azul (Valor x3)! Muy duro para tu pala actual (Nv.{_thermalEdgeLevel}) — Pulsa [T] para mejorar el Filo Térmico."
+                                : $"💎 ¡Núcleo Glaciar Azul extraído con Filo Térmico Nv.{_thermalEdgeLevel}! Vale TRIPLE Monedas de Calor (x3) en la chimenea.");
+                    }
+                    else if (scoopedTier == 1)
+                    {
+                        FactoryEvents.RaiseStatusMessage(
+                            _thermalEdgeLevel < 2
+                                ? $"🧊 Capa de Hielo Compacto (Valor x2): Con la pala básica apenas cede — Pulsa [T] ({nextThermalUpgradeCost} Monedas) para mejorar el Filo Térmico."
+                                : $"🧊 Hielo Compacto cortado limpiamente (Valor x2 Monedas de Calor).");
+                    }
+                    else if (!infiniteTestingMode)
+                    {
+                        FactoryEvents.RaiseStatusMessage(
+                            $"Nieve Polvo recogida: {_currentSnowLoad}/{maxSnowCapacity} (Valor x1)");
                     }
                 }
             }
@@ -351,7 +386,7 @@ namespace SnowFactory.Gameplay
             });
         }
 
-        private void SpawnThrowChunksToFireplace(FireplaceHearth fireplace, int deliveredScoops)
+        private void SpawnThrowChunksToFireplace(FireplaceHearth fireplace, int deliveredScoops, int deliveredValueUnits)
         {
             Vector3 startPos = scoopHead != null ? scoopHead.position : transform.position + transform.forward * 0.6f;
             Vector3 targetFireCenter = fireplace.transform.position + new Vector3(0f, 0.68f, 0f);
@@ -378,7 +413,8 @@ namespace SnowFactory.Gameplay
                     ArcHeight = 0.38f + i * 0.04f,
                     IsScoopInward = false,
                     TargetFireplace = i == visualChunkCount - 1 ? fireplace : null,
-                    DeliveredScoopReward = deliveredScoops
+                    DeliveredScoopReward = deliveredScoops,
+                    DeliveredValueUnits = deliveredValueUnits
                 });
             }
         }
@@ -438,7 +474,7 @@ namespace SnowFactory.Gameplay
                     }
                     else if (item.TargetFireplace != null)
                     {
-                        item.TargetFireplace.DepositSnow(item.DeliveredScoopReward);
+                        item.TargetFireplace.DepositSnow(item.DeliveredScoopReward, item.DeliveredValueUnits);
                     }
 
                     _flyingChunks.RemoveAt(i);
@@ -489,6 +525,44 @@ namespace SnowFactory.Gameplay
                 }
             }
 
+            // [T] Thermal Edge Upgrade! Allows the shovel to slice through Compacted Ice (Lv.2) and Deep Glacier Core (Lv.3)
+            if (kb.tKey.wasPressedThisFrame)
+            {
+                if (_thermalEdgeLevel >= 3)
+                {
+                    FactoryEvents.RaiseStatusMessage("🔥 ¡Tu Filo Térmico ya está al Nivel Máximo (Nv.3 - Corte Glaciar Total)!");
+                }
+                else
+                {
+                    if (_cachedHearth == null)
+                    {
+                        _cachedHearth = Object.FindFirstObjectByType<FireplaceHearth>();
+                    }
+
+                    // Allow free upgrade if Infinite Testing Mode [I] is active so the user can test Thermal Edge levels immediately!
+                    bool canAfford = infiniteTestingMode || (_cachedHearth != null && _cachedHearth.TrySpendHeatPoints(nextThermalUpgradeCost));
+                    if (canAfford)
+                    {
+                        _thermalEdgeLevel++;
+                        nextThermalUpgradeCost = Mathf.RoundToInt(nextThermalUpgradeCost * 2.0f);
+                        ApplyThermalEdgeVisualGlow();
+                        FactoryEvents.RaiseThermalEdgeLevelChanged(_thermalEdgeLevel);
+
+                        string tierUnlocked = _thermalEdgeLevel == 2
+                            ? "¡Ahora cortas Hielo Compacto (Azul Claro · x2) a máxima velocidad!"
+                            : "¡Ahora perforas el Núcleo Glaciar Azul (x3 Monedas) sin resistencia!";
+
+                        FactoryEvents.RaiseStatusMessage($"🔥 ¡Filo Térmico mejorado a Nivel {_thermalEdgeLevel}! {tierUnlocked}");
+                    }
+                    else
+                    {
+                        int currentCoins = _cachedHearth != null ? _cachedHearth.HeatPoints : 0;
+                        FactoryEvents.RaiseStatusMessage(
+                            $"Necesitas {nextThermalUpgradeCost} Monedas de Calor para el Filo Térmico Nv.{_thermalEdgeLevel + 1} (Tienes {currentCoins}). (O activa [I] Test para probarlo gratis).");
+                    }
+                }
+            }
+
             // [R] Call a fresh snowfall to refill all snow piles
             if (kb.rKey.wasPressedThisFrame)
             {
@@ -514,6 +588,32 @@ namespace SnowFactory.Gameplay
                 _baseScoopHeadScale.y,
                 _baseScoopHeadScale.z * lengthFactor
             );
+        }
+
+        private void ApplyThermalEdgeVisualGlow()
+        {
+            if (scoopHead == null) return;
+
+            Transform cuttingEdge = scoopHead.Find("BladeCuttingEdge");
+            if (cuttingEdge == null) return;
+
+            MeshRenderer mr = cuttingEdge.GetComponent<MeshRenderer>();
+            if (mr == null) return;
+
+            Material mat = mr.material;
+            Color glowColor = _thermalEdgeLevel >= 3
+                ? new Color(1.0f, 0.38f, 0.05f) * 3.2f
+                : new Color(1.0f, 0.55f, 0.12f) * 1.8f;
+
+            mat.color = _thermalEdgeLevel >= 3
+                ? new Color(1.0f, 0.52f, 0.18f)
+                : new Color(1.0f, 0.68f, 0.28f);
+
+            if (mat.HasProperty("_EmissionColor"))
+            {
+                mat.EnableKeyword("_EMISSION");
+                mat.SetColor("_EmissionColor", glowColor);
+            }
         }
 
         /// <summary>

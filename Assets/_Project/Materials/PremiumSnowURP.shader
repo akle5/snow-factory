@@ -175,16 +175,31 @@ Shader "SnowFactory/PremiumSnowURP"
                 float slopeShade = saturate(normalWS.y * 0.65 + 0.35);
                 float litFactor = saturate(wrappedDiffuse * shadowAtten * slopeShade);
 
-                // Vertex color red channel stores excavation depth (1 = untouched crest, 0 = deep scooped crater)
+                // Vertex color channels:
+                // - R: excavation depth AO (1 = untouched surface, 0.25 = deep crater)
+                // - G: exposed hardness layer tint (1.0 = Soft White Snow, 0.5 = Compacted Light-Blue Ice, 0.0 = Deep Glacier Blue Core)
                 float scoopDepthAO = lerp(0.45, 1.0, input.vertexCol.r);
+                float hardnessLayer = saturate(input.vertexCol.g);
 
                 // Three-stop glacier-to-sunlit color ramp for strong artistic identity
                 float3 deepGlacier = _ShadowSnowColor.rgb * 0.78;
                 float3 midAlpine = lerp(_ShadowSnowColor.rgb, _LitSnowColor.rgb, 0.55);
                 float rampT = saturate(litFactor * scoopDepthAO);
-                float3 baseSnow = rampT < 0.5
+                float3 softSnowColor = rampT < 0.5
                     ? lerp(deepGlacier, midAlpine, rampT * 2.0)
                     : lerp(midAlpine, _LitSnowColor.rgb, (rampT - 0.5) * 2.0);
+
+                // Layer 2: Compacted Frost Ice (Crisp Electric Cyan-Blue)
+                float3 compactIceColor = lerp(float3(0.15, 0.56, 0.92), float3(0.45, 0.85, 1.0), rampT);
+                // Layer 3: Deep Glacier Core (Rich Crystalline Cobalt/Sapphire Blue with inner glow)
+                float3 glacierCoreColor = lerp(float3(0.03, 0.18, 0.65), float3(0.14, 0.52, 0.98), rampT);
+
+                float3 baseSnow = hardnessLayer > 0.5
+                    ? lerp(compactIceColor, softSnowColor, (hardnessLayer - 0.5) * 2.0)
+                    : lerp(glacierCoreColor, compactIceColor, hardnessLayer * 2.0);
+
+                // Boost crystal sparkles when glacier ice is exposed!
+                float iceSparkleBoost = lerp(1.85, 1.0, hardnessLayer);
 
                 // Subsurface scattering band at the terminator & backlit edges
                 float sssBand = smoothstep(0.05, 0.55, wrappedDiffuse) * (1.0 - smoothstep(0.42, 0.88, saturate(NdotL)));
@@ -216,7 +231,7 @@ Shader "SnowFactory/PremiumSnowURP"
                 float crystalAlign = abs(dot(crystalFacetDir, halfVec));
                 float sparkleMask = circularDot * smoothstep(_SparkleThreshold, 0.995, crystalAlign);
 
-                float totalSparkle = sparkleMask * saturate(0.25 + litFactor * 0.85);
+                float totalSparkle = sparkleMask * saturate(0.25 + litFactor * 0.85) * iceSparkleBoost;
                 float3 sparkleEmission = _SparkleColor.rgb * (totalSparkle * _SparkleIntensity);
 
                 // 5. Velvet Fresnel Rim Glow for soft powdery silhouette

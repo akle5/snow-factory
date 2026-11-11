@@ -13,7 +13,7 @@ namespace SnowFactory.UI
     public class FactoryHudController : MonoBehaviour
     {
         private const string DefaultStatusHint =
-            "[Clic Izq / E] Apilar Nieve / Echar al Fuego   |   [U] Mejorar Pala   |   [R] Nueva Nevada   |   [I] Pala Infinita (Test)";
+            "[Clic Izq / E] Excavar / Echar al Fuego   |   [U] Ensanchar Pala   |   [T] Filo Térmico (Corta Hielo/Glaciar)   |   [R] Nevada   |   [I] Test";
 
         [SerializeField] private UIDocument uiDocument;
 
@@ -25,8 +25,9 @@ namespace SnowFactory.UI
         private int _heatPoints;
         private int _currentLoad;
         private int _maxCapacity = 3;
+        private int _thermalEdgeLevel = 1;
         private float _statusClearTimer;
-        private string _lastPrompt = "Apunta al montón de nieve para excavar (0/3)   |   [U] Ensanchar Pala (30 Monedas)   |   [R] Nueva Nevada   |   [I] Pala Infinita (Test)";
+        private string _lastPrompt = "Apunta al montón de nieve para excavar (0/3)   |   [U] Ensanchar Pala (30)   |   [T] Filo Térmico (40)   |   [R] Nevada   |   [I] Test";
 
         private void Awake()
         {
@@ -43,6 +44,7 @@ namespace SnowFactory.UI
             FactoryEvents.OnSnowBurnedCountChanged += HandleSnowBurnedChanged;
             FactoryEvents.OnHeatPointsChanged += HandleHeatPointsChanged;
             FactoryEvents.OnShovelLoadChanged += HandleShovelLoadChanged;
+            FactoryEvents.OnThermalEdgeLevelChanged += HandleThermalEdgeLevelChanged;
             FactoryEvents.OnPromptChanged += HandlePromptChanged;
             FactoryEvents.OnStatusMessage += HandleStatusMessage;
         }
@@ -52,6 +54,7 @@ namespace SnowFactory.UI
             FactoryEvents.OnSnowBurnedCountChanged -= HandleSnowBurnedChanged;
             FactoryEvents.OnHeatPointsChanged -= HandleHeatPointsChanged;
             FactoryEvents.OnShovelLoadChanged -= HandleShovelLoadChanged;
+            FactoryEvents.OnThermalEdgeLevelChanged -= HandleThermalEdgeLevelChanged;
             FactoryEvents.OnPromptChanged -= HandlePromptChanged;
             FactoryEvents.OnStatusMessage -= HandleStatusMessage;
         }
@@ -119,11 +122,17 @@ namespace SnowFactory.UI
             RefreshHeaderText();
         }
 
+        private void HandleThermalEdgeLevelChanged(int thermalLevel)
+        {
+            _thermalEdgeLevel = thermalLevel;
+            RefreshHeaderText();
+        }
+
         private void RefreshHeaderText()
         {
             if (_counterLabel != null)
             {
-                _counterLabel.text = $"MONEDAS DE CALOR: {_heatPoints}   |   PALA: {_currentLoad}/{_maxCapacity}   |   FUNDIDAS: {_burnedScoops}";
+                _counterLabel.text = $"MONEDAS DE CALOR: {_heatPoints}   |   PALA: {_currentLoad}/{_maxCapacity}   |   FILO TÉRMICO: Nv.{_thermalEdgeLevel}   |   FUNDIDAS: {_burnedScoops}";
             }
         }
 

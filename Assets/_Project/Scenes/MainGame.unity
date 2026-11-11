@@ -15246,6 +15246,7 @@ MonoBehaviour:
   maxSnowCapacity: 3
   upgradeCapacityStep: 2
   nextUpgradeCost: 30
+  nextThermalUpgradeCost: 40
   infiniteTestingMode: 0
 --- !u!1 &1488978570
 GameObject:
