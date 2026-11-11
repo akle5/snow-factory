@@ -11,14 +11,23 @@ namespace SnowFactory.Gameplay
     /// </summary>
     public class WheelbarrowController : MonoBehaviour
     {
+        private const float DumpAnimDuration = 0.56f;
+        private const float DumpPeakFraction = 0.30f;
+        private const float DumpFirstChunkDelay = 0.032f;
+
         private class DumpSnowChunk
         {
             public Transform ChunkTransform;
-            public Vector3 StartWorldPos;
+            public Vector3 LocalSpawnOffset;
+            public Vector3 P0;
+            public Vector3 P1;
+            public Vector3 P2;
             public Vector3 EndWorldPos;
+            public bool HasLaunched;
             public float Elapsed;
             public float Duration;
             public float ArcHeight;
+            public float BoundingRadius;
             public FireplaceHearth TargetFireplace;
             public int DeliveredScoops;
             public int DeliveredValueUnits;
@@ -47,7 +56,14 @@ namespace SnowFactory.Gameplay
         private float _currentLiftPitch;
         private float _currentSlopePitch;
         private float _dumpAnimTimer;
+        private float _dumpMoundDrainTimer;
+        private float _dumpMoundDrainDuration;
+        private float _dumpStartFillRatio;
+        private float _dumpAvgHardness = 1f;
+        private float _lastDrainVisualFillRatio = -1f;
         private Vector3 _lastWheelWorldPos;
+        private Vector3 _lastFrameWbPos;
+        private Vector3 _wbVelocity;
         private Material _traySnowMaterialInstance;
         private Material _dumpChunkMaterialInstance;
         private Mesh _traySnowMesh;
@@ -69,6 +85,7 @@ namespace SnowFactory.Gameplay
             ResolveReferences();
             BuildTraySnowBed();
             _lastWheelWorldPos = wheelPivot != null ? wheelPivot.position : transform.position;
+            _lastFrameWbPos = transform.position;
         }
 
         private void Start()
@@ -214,6 +231,16 @@ namespace SnowFactory.Gameplay
             return transform.position + Vector3.up * 0.54f;
         }
 
+        public Vector3 GetTrayDumpMouthWorldPoint(Vector3 localSpread = default)
+        {
+            Vector3 mouthLocal = new Vector3(0.0175f, 0.708f, 0.482f) + localSpread;
+            if (traySnowRoot != null)
+            {
+                return traySnowRoot.TransformPoint(mouthLocal);
+            }
+            return transform.TransformPoint(mouthLocal);
+        }
+
         public bool TryReceiveFromShovel(int scoopCount, int totalValueUnits, out int acceptedCount)
         {
             acceptedCount = 0;
@@ -232,6 +259,7 @@ namespace SnowFactory.Gameplay
 
             _currentSnowLoad += acceptedCount;
             _accumulatedValueUnits += acceptedValue;
+            _dumpMoundDrainTimer = 0f;
 
             RefreshTraySnowVisuals();
             FactoryEvents.RaiseWheelbarrowLoadChanged(_currentSnowLoad, maxCapacity);
@@ -251,7 +279,14 @@ namespace SnowFactory.Gameplay
             Vector3 trayWorld = GetTrayReceiveWorldPoint();
             Vector3 hearthTarget = hearth.transform.position + Vector3.up * 0.6f;
             float distSq = (new Vector2(trayWorld.x - hearthTarget.x, trayWorld.z - hearthTarget.z)).sqrMagnitude;
-            return distSq <= fireplaceDumpRange * fireplaceDumpRange;
+            if (distSq > fireplaceDumpRange * fireplaceDumpRange) return false;
+
+            // Reject dumping from behind the solid brick back wall of the fireplace
+            Vector3 mouthHearthLocal = hearth.transform.InverseTransformPoint(GetTrayDumpMouthWorldPoint());
+            if (mouthHearthLocal.z < 0.05f) return false;
+            if (Mathf.Abs(mouthHearthLocal.x) < 1.28f && mouthHearthLocal.z < 0.25f) return false;
+
+            return true;
         }
 
         public bool TryDumpIntoFireplace(FireplaceHearth hearth)
@@ -261,11 +296,14 @@ namespace SnowFactory.Gameplay
             int deliveredScoops = _currentSnowLoad;
             int deliveredValue = Mathf.Max(deliveredScoops, _accumulatedValueUnits);
 
+            _dumpStartFillRatio = Mathf.Clamp01((float)deliveredScoops / Mathf.Max(1, maxCapacity));
+            _dumpAvgHardness = Mathf.Clamp((float)deliveredValue / Mathf.Max(1, deliveredScoops), 1f, 3f);
+            _lastDrainVisualFillRatio = _dumpStartFillRatio;
+
             _currentSnowLoad = 0;
             _accumulatedValueUnits = 0;
-            _dumpAnimTimer = 0.52f;
+            _dumpAnimTimer = DumpAnimDuration;
 
-            RefreshTraySnowVisuals();
             FactoryEvents.RaiseWheelbarrowLoadChanged(_currentSnowLoad, maxCapacity);
 
             SpawnDumpBurstToFireplace(hearth, deliveredScoops, deliveredValue);
@@ -274,7 +312,6 @@ namespace SnowFactory.Gameplay
 
         private void SpawnDumpBurstToFireplace(FireplaceHearth hearth, int deliveredScoops, int deliveredValueUnits)
         {
-            Vector3 startPos = GetTrayReceiveWorldPoint();
             Vector3 fireCenter = hearth.transform.position + new Vector3(0f, 0.72f, 0f);
             float avgTierValue = (float)deliveredValueUnits / Mathf.Max(1, deliveredScoops);
             int iceTier = ProceduralSnowMeshUtility.HardnessMultiplierToIceTier(avgTierValue);
@@ -287,19 +324,28 @@ namespace SnowFactory.Gameplay
                 avgTierValue);
 
             int chunkCount = Mathf.Clamp(Mathf.CeilToInt(deliveredScoops * 0.5f) + 2, 3, 12);
+            float staggerStep = chunkCount > 1 ? Mathf.Min(0.016f, 0.165f / (chunkCount - 1)) : 0f;
+            _dumpMoundDrainDuration = DumpFirstChunkDelay + (chunkCount - 1) * staggerStep;
+            _dumpMoundDrainTimer = _dumpMoundDrainDuration;
+
             for (int i = 0; i < chunkCount; i++)
             {
-                Vector3 spread = new Vector3(
-                    Random.Range(-0.22f, 0.22f),
-                    Random.Range(-0.04f, 0.16f),
-                    Random.Range(-0.18f, 0.18f));
+                Vector3 localSpread = new Vector3(
+                    Random.Range(-0.11f, 0.11f),
+                    Random.Range(0.0f, 0.045f),
+                    Random.Range(0.0f, 0.045f));
+                Vector3 fireSpread = new Vector3(
+                    Random.Range(-0.16f, 0.16f),
+                    Random.Range(-0.03f, 0.11f),
+                    Random.Range(-0.12f, 0.12f));
 
                 GameObject go = new GameObject("WheelbarrowDumpChunk");
-                go.transform.position = startPos + spread * 0.45f;
-                go.transform.localScale = new Vector3(
+                go.transform.position = GetTrayDumpMouthWorldPoint(localSpread);
+                Vector3 chunkScale = new Vector3(
                     Random.Range(0.16f, 0.22f),
                     Random.Range(0.13f, 0.18f),
                     Random.Range(0.15f, 0.21f));
+                go.transform.localScale = chunkScale;
                 go.transform.rotation = Random.rotation;
 
                 MeshFilter mf = go.AddComponent<MeshFilter>();
@@ -311,14 +357,20 @@ namespace SnowFactory.Gameplay
                     mr.sharedMaterial = chunkMat;
                 }
 
+                // Keep staggered chunks hidden until their launch frame while the tub mound visually empties
+                go.SetActive(false);
+
+                float boundingRadius = Mathf.Max(chunkScale.x, Mathf.Max(chunkScale.y, chunkScale.z)) * 0.48f;
                 _dumpChunks.Add(new DumpSnowChunk
                 {
                     ChunkTransform = go.transform,
-                    StartWorldPos = go.transform.position,
-                    EndWorldPos = fireCenter + spread * 0.7f,
-                    Elapsed = -i * 0.025f,
-                    Duration = 0.32f,
-                    ArcHeight = 0.55f + (i % 3) * 0.08f,
+                    LocalSpawnOffset = localSpread,
+                    EndWorldPos = fireCenter + fireSpread,
+                    HasLaunched = false,
+                    Elapsed = -(DumpFirstChunkDelay + i * staggerStep),
+                    Duration = 0.34f,
+                    ArcHeight = 0.46f + (i % 3) * 0.07f,
+                    BoundingRadius = boundingRadius,
                     TargetFireplace = i == chunkCount - 1 ? hearth : null,
                     DeliveredScoops = deliveredScoops,
                     DeliveredValueUnits = deliveredValueUnits
@@ -357,6 +409,8 @@ namespace SnowFactory.Gameplay
             }
 
             _lastWheelWorldPos = wheelPivot != null ? wheelPivot.position : transform.position;
+            _lastFrameWbPos = transform.position;
+            _wbVelocity = Vector3.zero;
             FactoryEvents.RaiseStatusMessage(
                 $"Conduciendo carretilla ({_currentSnowLoad}/{maxCapacity}). [WASD + Ratón] Mover · [Shift] Turbo · [F] Soltar.");
         }
@@ -423,11 +477,6 @@ namespace SnowFactory.Gameplay
             return false;
         }
 
-        private void Update()
-        {
-            UpdateDumpChunks();
-        }
-
         private void LateUpdate()
         {
             if (_isDriving && _driver != null)
@@ -438,6 +487,23 @@ namespace SnowFactory.Gameplay
             {
                 UpdateParkedTilt();
             }
+
+            if (Time.deltaTime > 0.0001f)
+            {
+                Vector3 rawVel = (transform.position - _lastFrameWbPos) / Time.deltaTime;
+                rawVel.y = 0f;
+                _wbVelocity = Vector3.ClampMagnitude(rawVel, 12f);
+            }
+            else
+            {
+                _wbVelocity = Vector3.zero;
+            }
+            _lastFrameWbPos = transform.position;
+
+            UpdateDumpingTrayMoundDrain();
+
+            // Update projectiles after the wheelbarrow and TrayTiltPivot poses have resolved for this frame
+            UpdateDumpChunks();
         }
 
         private void UpdateDrivenPose()
@@ -486,8 +552,12 @@ namespace SnowFactory.Gameplay
             if (_dumpAnimTimer > 0f)
             {
                 _dumpAnimTimer = Mathf.Max(0f, _dumpAnimTimer - Time.deltaTime);
-                float t = 1f - (_dumpAnimTimer / 0.52f);
-                dumpTilt = Mathf.Sin(t * Mathf.PI) * 38f;
+                float p = 1f - (_dumpAnimTimer / DumpAnimDuration);
+                // Tip forward briskly to match the snow spill (peaking at DumpPeakFraction), then return smoothly
+                float shaped = p < DumpPeakFraction
+                    ? Mathf.Sin((p / DumpPeakFraction) * Mathf.PI * 0.5f)
+                    : Mathf.Cos(((p - DumpPeakFraction) / (1f - DumpPeakFraction)) * Mathf.PI * 0.5f);
+                dumpTilt = Mathf.Clamp01(shaped) * 40f;
             }
 
             if (trayTiltPivot != null)
@@ -535,17 +605,165 @@ namespace SnowFactory.Gameplay
             return found ? bestY : fallbackY;
         }
 
+        private void UpdateDumpingTrayMoundDrain()
+        {
+            if (_currentSnowLoad > 0 || _traySnowMoundGo == null || _traySnowMesh == null || _cavityMap == null)
+            {
+                return;
+            }
+
+            if (_dumpMoundDrainTimer <= 0f)
+            {
+                if (_traySnowMoundGo.activeSelf)
+                {
+                    _traySnowMoundGo.SetActive(false);
+                }
+                return;
+            }
+
+            _dumpMoundDrainTimer = Mathf.Max(0f, _dumpMoundDrainTimer - Time.deltaTime);
+            float remainFrac = _dumpMoundDrainDuration > 0.001f
+                ? Mathf.Clamp01(_dumpMoundDrainTimer / _dumpMoundDrainDuration)
+                : 0f;
+
+            if (remainFrac <= 0.02f)
+            {
+                _dumpMoundDrainTimer = 0f;
+                _traySnowMoundGo.SetActive(false);
+                return;
+            }
+
+            _traySnowMoundGo.SetActive(true);
+            float targetFill = _dumpStartFillRatio * remainFrac;
+            if (_lastDrainVisualFillRatio < 0f || Mathf.Abs(_lastDrainVisualFillRatio - targetFill) >= 0.08f)
+            {
+                _lastDrainVisualFillRatio = targetFill;
+                ProceduralSnowMeshUtility.ApplyCarriedSnowHardnessTint(_traySnowMaterialInstance, _dumpAvgHardness);
+                ProceduralSnowMeshUtility.UpdateWheelbarrowSnowMesh(_traySnowMesh, _cavityMap, targetFill, _dumpAvgHardness);
+            }
+        }
+
         private void UpdateDumpChunks()
         {
+            Vector3 wbFwd = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
+            if (wbFwd.sqrMagnitude < 0.0001f) wbFwd = Vector3.forward;
+            wbFwd.Normalize();
+            Vector3 wbRight = Vector3.Cross(Vector3.up, wbFwd).normalized;
+
             for (int i = _dumpChunks.Count - 1; i >= 0; i--)
             {
                 DumpSnowChunk c = _dumpChunks[i];
                 c.Elapsed += Time.deltaTime;
                 if (c.Elapsed < 0f) continue;
 
+                FireplaceHearth activeHearth = c.TargetFireplace != null ? c.TargetFireplace : _cachedHearth;
+
+                if (!c.HasLaunched)
+                {
+                    c.HasLaunched = true;
+                    Vector3 p0 = GetTrayDumpMouthWorldPoint(c.LocalSpawnOffset);
+                    Vector3 toEndHoriz = Vector3.ProjectOnPlane(c.EndWorldPos - p0, Vector3.up);
+                    float horizDist = toEndHoriz.magnitude;
+                    Vector3 dirToFire = horizDist > 0.001f ? toEndHoriz / horizDist : wbFwd;
+                    float facingDot = Vector3.Dot(wbFwd, dirToFire);
+                    float fwdSpeed = Mathf.Max(0f, Vector3.Dot(_wbVelocity, wbFwd));
+
+                    c.Duration = Mathf.Clamp(0.28f + horizDist * 0.035f, 0.32f, 0.48f);
+
+                    Vector3 p1;
+                    Vector3 p2;
+
+                    bool hasPortal = activeHearth != null;
+                    Vector3 p0Hearth = hasPortal ? activeHearth.transform.InverseTransformPoint(p0) : Vector3.zero;
+                    Vector3 portalWorld = Vector3.zero;
+                    if (hasPortal)
+                    {
+                        Vector3 portalLocal = new Vector3(
+                            Mathf.Clamp(p0Hearth.x * 0.25f, -0.32f, 0.32f),
+                            1.02f,
+                            0.94f);
+                        portalWorld = activeHearth.transform.TransformPoint(portalLocal);
+                    }
+
+                    if (facingDot >= 0.25f)
+                    {
+                        float forwardPush = Mathf.Clamp(horizDist * 0.36f, 0.18f, 0.65f);
+                        if (horizDist > 1.2f)
+                        {
+                            forwardPush += Mathf.Min(fwdSpeed * 0.04f, horizDist * 0.22f);
+                        }
+                        float upPush = Mathf.Clamp(0.30f + horizDist * 0.07f + fwdSpeed * 0.03f, 0.30f, 0.62f);
+                        Vector3 lateralDodge = dirToFire * (fwdSpeed * 0.045f * (1f - facingDot));
+
+                        p1 = p0 + wbFwd * forwardPush + Vector3.up * upPush + lateralDodge;
+                        p2 = Vector3.Lerp(p1, c.EndWorldPos, 0.52f) + Vector3.up * (c.ArcHeight * 0.78f);
+
+                        if (hasPortal && Mathf.Abs(p0Hearth.x) > 0.55f && p0Hearth.z < 2.6f)
+                        {
+                            p2 = Vector3.Lerp(p2, portalWorld, 0.78f);
+                        }
+                    }
+                    else
+                    {
+                        // Angled sideways, sprinting past, or facing away: eject clear of the front lip and sweep around the side
+                        float sideDot = Vector3.Dot(wbRight, dirToFire);
+                        float sideSign = sideDot >= -0.05f ? 1f : -1f;
+                        float awayness = Mathf.InverseLerp(0.25f, -1.0f, facingDot);
+
+                        float forwardPush = Mathf.Lerp(0.34f, 0.26f, awayness);
+                        float sidePush = sideSign * Mathf.Lerp(0.42f, 0.80f, awayness);
+                        float upPush = Mathf.Lerp(0.58f, 0.76f, awayness);
+
+                        p1 = p0 + wbFwd * forwardPush + wbRight * sidePush + Vector3.up * upPush;
+                        p2 = Vector3.Lerp(p1, c.EndWorldPos, 0.50f);
+                        p2 += wbRight * (sideSign * 0.72f * awayness);
+                        p2.y = Mathf.Max(p2.y, Mathf.Max(p0.y, c.EndWorldPos.y) + Mathf.Lerp(0.55f, 0.72f, awayness));
+
+                        if (hasPortal && (Mathf.Abs(p0Hearth.x) > 0.52f || p0Hearth.z < 1.35f))
+                        {
+                            float portalBlend = Mathf.Lerp(0.75f, 0.45f, awayness);
+                            p2 = Vector3.Lerp(p2, portalWorld, portalBlend);
+                            if (awayness > 0.35f)
+                            {
+                                // Keep the midpoint swept laterally outside the wheelbarrow even when blending toward the hearth portal
+                                p2 += wbRight * (sideSign * 0.35f * awayness);
+                            }
+                        }
+                    }
+
+                    // Keep trajectories below BrickLintel (y=1.825) and inside side pillars near the hearth opening
+                    if (hasPortal)
+                    {
+                        Vector3 p2H = activeHearth.transform.InverseTransformPoint(p2);
+                        if (p2H.z > -0.4f && p2H.z < 1.15f && Mathf.Abs(p2H.x) < 1.35f)
+                        {
+                            p2H.y = Mathf.Min(p2H.y, 1.48f);
+                            if (p2H.z < 0.78f)
+                            {
+                                p2H.x = Mathf.Clamp(p2H.x, -0.36f, 0.36f);
+                            }
+                            p2 = activeHearth.transform.TransformPoint(p2H);
+                        }
+                    }
+
+                    c.P0 = p0;
+                    c.P1 = p1;
+                    c.P2 = p2;
+
+                    if (c.ChunkTransform != null)
+                    {
+                        c.ChunkTransform.position = p0;
+                        c.ChunkTransform.gameObject.SetActive(true);
+                    }
+                }
+
                 float t = Mathf.Clamp01(c.Elapsed / c.Duration);
-                Vector3 pos = Vector3.Lerp(c.StartWorldPos, c.EndWorldPos, t);
-                pos.y += 4f * t * (1f - t) * c.ArcHeight;
+                Vector3 pos = EvaluateCubicBezier(c.P0, c.P1, c.P2, c.EndWorldPos, t);
+
+                if (t < 0.94f)
+                {
+                    EnforceWheelbarrowAndMasonryClearance(ref pos, c, t, activeHearth);
+                }
 
                 if (c.ChunkTransform != null)
                 {
@@ -564,6 +782,165 @@ namespace SnowFactory.Gameplay
                     _dumpChunks.RemoveAt(i);
                 }
             }
+        }
+
+        private void EnforceWheelbarrowAndMasonryClearance(ref Vector3 pos, DumpSnowChunk c, float t, FireplaceHearth hearth)
+        {
+            float pad = Mathf.Max(0.11f, c.BoundingRadius + 0.025f);
+
+            // 1. Live clearance against tilted tub + handles in TraySnowRoot local space
+            if (traySnowRoot != null)
+            {
+                Vector3 lp = traySnowRoot.InverseTransformPoint(pos);
+                Vector3 localPush = Vector3.zero;
+
+                // Tub + frame envelope: x in [-0.38, 0.41], y in [0.00, 0.64], z in [-0.60, 0.44]
+                if (TryComputeBoxEscapePush(lp, new Vector3(-0.38f, 0.00f, -0.60f), new Vector3(0.41f, 0.64f, 0.44f), pad, true, out Vector3 tubPush))
+                {
+                    localPush += tubPush;
+                    lp += tubPush;
+                }
+
+                // Rear handles envelope: x in [-0.40, 0.43], y in [0.34, 0.71], z in [-1.31, -0.56]
+                if (TryComputeBoxEscapePush(lp, new Vector3(-0.40f, 0.34f, -1.31f), new Vector3(0.43f, 0.71f, -0.56f), pad, true, out Vector3 handlePush))
+                {
+                    localPush += handlePush;
+                }
+
+                if (localPush.sqrMagnitude > 0.000001f)
+                {
+                    Vector3 worldPush = traySnowRoot.TransformVector(localPush);
+                    pos += worldPush;
+                    // Gently bias control points so subsequent frames stay smoothly clear without snapping back inside
+                    float ctrlWeight = Mathf.Clamp(1f - t, 0.2f, 1f);
+                    c.P1 += worldPush * (0.45f * ctrlWeight);
+                    c.P2 += worldPush * (0.45f * ctrlWeight);
+                }
+            }
+
+            // 2. Live clearance against front wheel envelope in Wheelbarrow root space
+            Vector3 rp = transform.InverseTransformPoint(pos);
+            if (TryComputeBoxEscapePush(rp, new Vector3(-0.08f, 0.00f, 0.14f), new Vector3(0.12f, 0.41f, 0.57f), pad, false, out Vector3 wheelPush))
+            {
+                Vector3 worldWheelPush = transform.TransformVector(wheelPush);
+                pos += worldWheelPush;
+                c.P1 += worldWheelPush * 0.35f;
+            }
+
+            // 3. Live clearance against FireplaceHearth brick side pillars & lintel so chunks enter through the open firebox mouth
+            if (hearth != null)
+            {
+                Vector3 hp = hearth.transform.InverseTransformPoint(pos);
+                bool modified = false;
+
+                if (hp.z > -0.40f && hp.z < 0.80f && Mathf.Abs(hp.x) >= 0.46f && Mathf.Abs(hp.x) <= 1.32f && hp.y < 2.35f)
+                {
+                    float signX = Mathf.Sign(hp.x);
+                    if (Mathf.Abs(hp.x) <= 0.72f)
+                    {
+                        float pushInX = (signX * 0.44f) - hp.x;
+                        float pushFrontZ = 0.82f - hp.z;
+                        if (Mathf.Abs(pushInX) < pushFrontZ)
+                        {
+                            hp.x += pushInX;
+                        }
+                        else
+                        {
+                            hp.z += pushFrontZ;
+                        }
+                    }
+                    else
+                    {
+                        float pushOutX = (signX * 1.34f) - hp.x;
+                        float pushFrontZ = 0.82f - hp.z;
+                        if (Mathf.Abs(pushOutX) < pushFrontZ)
+                        {
+                            hp.x += pushOutX;
+                        }
+                        else
+                        {
+                            hp.z += pushFrontZ;
+                        }
+                    }
+                    modified = true;
+                }
+
+                if (hp.z > -0.40f && hp.z < 0.82f && Mathf.Abs(hp.x) < 1.28f && hp.y > 1.66f && hp.y < 2.45f)
+                {
+                    hp.y = 1.66f;
+                    modified = true;
+                }
+
+                if (modified)
+                {
+                    pos = hearth.transform.TransformPoint(hp);
+                }
+            }
+        }
+
+        private static bool TryComputeBoxEscapePush(
+            Vector3 p,
+            Vector3 minBounds,
+            Vector3 maxBounds,
+            float pad,
+            bool allowUpBias,
+            out Vector3 push)
+        {
+            float minX = minBounds.x - pad;
+            float maxX = maxBounds.x + pad;
+            float minY = minBounds.y - pad;
+            float maxY = maxBounds.y + pad;
+            float minZ = minBounds.z - pad;
+            float maxZ = maxBounds.z + pad;
+
+            if (p.x <= minX || p.x >= maxX || p.y <= minY || p.y >= maxY || p.z <= minZ || p.z >= maxZ)
+            {
+                push = Vector3.zero;
+                return false;
+            }
+
+            float pushLeft = maxX - p.x;   // +X
+            float pushRight = p.x - minX;  // -X
+            float pushUp = maxY - p.y;     // +Y
+            float pushFwd = maxZ - p.z;    // +Z
+            float pushBack = p.z - minZ;   // -Z
+
+            // Prefer lifting up (+Y) over the tub rim or pushing sideways/forward rather than pushing down into the floor
+            float bestCost = allowUpBias ? pushUp * 0.72f : pushUp;
+            push = new Vector3(0f, pushUp, 0f);
+
+            if (pushLeft < bestCost)
+            {
+                bestCost = pushLeft;
+                push = new Vector3(pushLeft, 0f, 0f);
+            }
+            if (pushRight < bestCost)
+            {
+                bestCost = pushRight;
+                push = new Vector3(-pushRight, 0f, 0f);
+            }
+            if (pushFwd < bestCost)
+            {
+                bestCost = pushFwd;
+                push = new Vector3(0f, 0f, pushFwd);
+            }
+            if (pushBack < bestCost)
+            {
+                push = new Vector3(0f, 0f, -pushBack);
+            }
+
+            return true;
+        }
+
+        private static Vector3 EvaluateCubicBezier(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3, float t)
+        {
+            float u = 1f - t;
+            float uu = u * u;
+            float tt = t * t;
+            return (uu * u) * p0
+                 + (3f * uu * t) * p1
+                 + (3f * u * tt) * p2
+                 + (tt * t) * p3;
         }
 
         private void RefreshTraySnowVisuals()
