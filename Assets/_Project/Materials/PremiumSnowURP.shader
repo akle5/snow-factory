@@ -24,6 +24,9 @@ Shader "SnowFactory/PremiumSnowURP"
         _RimColor ("Rim Glow Color", Color) = (0.82, 0.93, 1.0, 1.0)
         _RimPower ("Rim Power", Range(1.0, 8.0)) = 3.2
         _RimIntensity ("Rim Intensity", Range(0.0, 2.0)) = 0.48
+
+        [Header(Carried Snow Mode)]
+        _UseObjectSpace ("Object-Space Detail (0=World, 1=Local)", Float) = 0.0
     }
 
     SubShader
@@ -66,6 +69,7 @@ Shader "SnowFactory/PremiumSnowURP"
                 float4 _RimColor;
                 float _RimPower;
                 float _RimIntensity;
+                float _UseObjectSpace;
             CBUFFER_END
 
             struct Attributes
@@ -83,6 +87,7 @@ Shader "SnowFactory/PremiumSnowURP"
                 float4 vertexCol         : TEXCOORD2;
                 float  fogFactor         : TEXCOORD3;
                 float3 positionOS_cached : TEXCOORD4;
+                float3 positionOS_local  : TEXCOORD5;
             };
 
             // Fast 3D hash for procedural snow grains and ice crystal facets
@@ -143,6 +148,7 @@ Shader "SnowFactory/PremiumSnowURP"
                 output.vertexCol = input.color;
                 output.fogFactor = ComputeFogFactor(posInputs.positionCS.z);
                 output.positionOS_cached = posInputs.positionWS;
+                output.positionOS_local = input.positionOS.xyz;
                 return output;
             }
 
@@ -152,16 +158,52 @@ Shader "SnowFactory/PremiumSnowURP"
                 float3 viewDirWS = GetWorldSpaceNormalizeViewDir(posWS);
 
                 // 1. Procedural organic powder & wind-drift normal perturbation via finite differences
-                float eps = 0.035;
-                float3 macroPos = posWS * _MacroScale;
-                float3 microPos = posWS * _MicroScale;
+                float3 normalWS;
+                float3 sparkleCoord = input.positionOS_cached;
+                if (_UseObjectSpace > 0.5)
+                {
+                    // Evaluate carried snow in metric local space (positionOS * worldScale) and rotate
+                    // the gradient only by the orthonormal local axes so small/non-uniformly scaled clods
+                    // and widened shovel blades never suffer 1/scale normal blowup or axis stretching.
+                    float3 axisX = TransformObjectToWorldDir(float3(1.0, 0.0, 0.0), false);
+                    float3 axisY = TransformObjectToWorldDir(float3(0.0, 1.0, 0.0), false);
+                    float3 axisZ = TransformObjectToWorldDir(float3(0.0, 0.0, 1.0), false);
+                    float3 objScale = max(float3(length(axisX), length(axisY), length(axisZ)), float3(1e-4, 1e-4, 1e-4));
 
-                float hCenter = SnowFBM(macroPos) * 0.65 + Noise3D(microPos) * 0.35;
-                float hX = SnowFBM((posWS + float3(eps, 0, 0)) * _MacroScale) * 0.65 + Noise3D((posWS + float3(eps, 0, 0)) * _MicroScale) * 0.35;
-                float hZ = SnowFBM((posWS + float3(0, 0, eps)) * _MacroScale) * 0.65 + Noise3D((posWS + float3(0, 0, eps)) * _MicroScale) * 0.35;
+                    float3 dirX = axisX / objScale.x;
+                    float3 dirY = axisY / objScale.y;
+                    float3 dirZ = axisZ / objScale.z;
 
-                float3 grad = float3(hX - hCenter, 0.0, hZ - hCenter) / eps;
-                float3 normalWS = normalize(input.normalWS - grad * _BumpStrength);
+                    float3 sampleP = input.positionOS_local * objScale;
+                    sparkleCoord = sampleP;
+
+                    float eps = 0.015;
+                    float hCenter = SnowFBM(sampleP * _MacroScale) * 0.60 + Noise3D(sampleP * _MicroScale) * 0.40;
+                    float hX = SnowFBM((sampleP + float3(eps, 0.0, 0.0)) * _MacroScale) * 0.60 + Noise3D((sampleP + float3(eps, 0.0, 0.0)) * _MicroScale) * 0.40;
+                    float hY = SnowFBM((sampleP + float3(0.0, eps, 0.0)) * _MacroScale) * 0.60 + Noise3D((sampleP + float3(0.0, eps, 0.0)) * _MicroScale) * 0.40;
+                    float hZ = SnowFBM((sampleP + float3(0.0, 0.0, eps)) * _MacroScale) * 0.60 + Noise3D((sampleP + float3(0.0, 0.0, eps)) * _MicroScale) * 0.40;
+
+                    float3 gradMetric = float3(hX - hCenter, hY - hCenter, hZ - hCenter) / eps;
+                    float3 gradWS = dirX * gradMetric.x + dirY * gradMetric.y + dirZ * gradMetric.z;
+
+                    // Project gradient onto the surface tangent plane so 3D tumbling clods never invert normals
+                    float3 baseNormalWS = SafeNormalize(input.normalWS);
+                    float3 gradTangentWS = gradWS - baseNormalWS * dot(gradWS, baseNormalWS);
+                    normalWS = SafeNormalize(baseNormalWS - gradTangentWS * _BumpStrength);
+                }
+                else
+                {
+                    float eps = 0.035;
+                    float3 macroPos = posWS * _MacroScale;
+                    float3 microPos = posWS * _MicroScale;
+
+                    float hCenter = SnowFBM(macroPos) * 0.65 + Noise3D(microPos) * 0.35;
+                    float hX = SnowFBM((posWS + float3(eps, 0, 0)) * _MacroScale) * 0.65 + Noise3D((posWS + float3(eps, 0, 0)) * _MicroScale) * 0.35;
+                    float hZ = SnowFBM((posWS + float3(0, 0, eps)) * _MacroScale) * 0.65 + Noise3D((posWS + float3(0, 0, eps)) * _MicroScale) * 0.35;
+
+                    float3 grad = float3(hX - hCenter, 0.0, hZ - hCenter) / eps;
+                    normalWS = normalize(input.normalWS - grad * _BumpStrength);
+                }
 
                 // 2. Main Light + Soft Wrapped Diffuse + Subsurface Scattering
                 float4 shadowCoord = TransformWorldToShadowCoord(posWS);
@@ -215,8 +257,8 @@ Shader "SnowFactory/PremiumSnowURP"
                 float hearthAtten = saturate(1.0 / (1.0 + distSq * 0.14)) * saturate(1.0 - distSq / 85.0);
                 float3 additionalLightsColor = float3(1.0, 0.48, 0.14) * (hearthWrap * hearthAtten * 0.95);
 
-                // 4. View-Dependent Ice Crystal Micro-Sparkles (Circular organic glints in Object Space — no boxy grid cells!)
-                float3 osPos = input.positionOS_cached * _SparkleScale;
+                // 4. View-Dependent Ice Crystal Micro-Sparkles (Circular organic glints — world space or metric object space for carried snow)
+                float3 osPos = sparkleCoord * _SparkleScale;
                 float3 cellId = floor(osPos);
                 float3 cellLocal = frac(osPos) - 0.5;
                 float3 rnd = Hash33(cellId);

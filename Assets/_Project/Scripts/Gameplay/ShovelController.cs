@@ -56,35 +56,13 @@ namespace SnowFactory.Gameplay
         private WheelbarrowController _drivingWheelbarrow;
         private Material _snowMaterial;
 
-        private readonly List<Transform> _bladeClumpVisuals = new List<Transform>();
+        private Material _shovelSnowMaterialInstance;
+        private Material _flyingChunkMaterialInstance;
+        private Mesh _shovelSnowMesh;
+        private GameObject _shovelSnowMoundGo;
+        private ProceduralSnowMeshUtility.ContainerCavityMap _panCavityMap;
         private readonly List<FlyingSnowChunk> _flyingChunks = new List<FlyingSnowChunk>();
-
-        // Pre-computed organic positions inside the concave pan (rear-to-front, left-to-right, low profile!)
-        private static readonly Vector3[] ClumpLocalOffsets =
-        {
-            new Vector3(-0.07f, 0.015f, -0.01f),
-            new Vector3( 0.07f, 0.016f,  0.00f),
-            new Vector3( 0.00f, 0.014f,  0.06f),
-            new Vector3(-0.09f, 0.018f,  0.06f),
-            new Vector3( 0.09f, 0.018f,  0.06f),
-            new Vector3( 0.00f, 0.036f,  0.02f),
-            new Vector3(-0.06f, 0.034f,  0.05f),
-            new Vector3( 0.06f, 0.034f,  0.05f),
-            new Vector3( 0.00f, 0.028f,  0.10f)
-        };
-
-        private static readonly Vector3[] ClumpLocalScales =
-        {
-            new Vector3(0.18f, 0.065f, 0.16f),
-            new Vector3(0.17f, 0.068f, 0.16f),
-            new Vector3(0.19f, 0.060f, 0.16f),
-            new Vector3(0.16f, 0.062f, 0.15f),
-            new Vector3(0.16f, 0.062f, 0.15f),
-            new Vector3(0.20f, 0.065f, 0.17f),
-            new Vector3(0.17f, 0.060f, 0.15f),
-            new Vector3(0.17f, 0.060f, 0.15f),
-            new Vector3(0.18f, 0.055f, 0.14f)
-        };
+        private int _clodVariantCounter;
 
         public int CurrentSnowLoad => _currentSnowLoad;
         public int MaxSnowCapacity => maxSnowCapacity;
@@ -159,15 +137,7 @@ namespace SnowFactory.Gameplay
 
             if (_snowMaterial == null)
             {
-                SnowPile anyPile = Object.FindFirstObjectByType<SnowPile>();
-                if (anyPile != null)
-                {
-                    MeshRenderer pileMr = anyPile.GetComponent<MeshRenderer>();
-                    if (pileMr != null)
-                    {
-                        _snowMaterial = pileMr.sharedMaterial;
-                    }
-                }
+                _snowMaterial = ProceduralSnowMeshUtility.FindSceneSnowMaterial();
             }
         }
 
@@ -175,43 +145,86 @@ namespace SnowFactory.Gameplay
         {
             if (scoopHead == null) return;
 
+            ProceduralSnowMeshUtility.GetOrCreateCarriedSnowMaterial(
+                ref _shovelSnowMaterialInstance,
+                _snowMaterial,
+                "M_ShovelSnowRuntime",
+                ProceduralSnowMeshUtility.CarriedSnowMaterialProfile.ShovelMound);
+
             Transform existingRoot = scoopHead.Find("ClumpBedRoot");
             if (existingRoot != null)
             {
                 Destroy(existingRoot.gameObject);
             }
 
+            if (_shovelSnowMesh != null)
+            {
+                Destroy(_shovelSnowMesh);
+                _shovelSnowMesh = null;
+            }
+            _shovelSnowMoundGo = null;
+            _panCavityMap = null;
+
             GameObject bedRoot = new GameObject("ClumpBedRoot");
             bedRoot.transform.SetParent(scoopHead, false);
             bedRoot.transform.localPosition = Vector3.zero;
             bedRoot.transform.localRotation = Quaternion.identity;
 
-            _bladeClumpVisuals.Clear();
-
-            for (int i = 0; i < ClumpLocalOffsets.Length; i++)
+            Transform plasticTr = scoopHead.Find("Sketchfab_ShovelSnow_Model/Shovel_BlackPlastic");
+            MeshFilter plasticMf = plasticTr != null ? plasticTr.GetComponent<MeshFilter>() : null;
+            if (plasticMf == null)
             {
-                GameObject clump = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-                clump.name = $"SnowClump_{i}";
-                clump.transform.SetParent(bedRoot.transform, false);
-                clump.transform.localPosition = ClumpLocalOffsets[i];
-                clump.transform.localRotation = Quaternion.Euler(
-                    (i * 13f) % 18f - 9f,
-                    (i * 47f) % 360f,
-                    (i * 19f) % 16f - 8f);
-                clump.transform.localScale = ClumpLocalScales[i];
-
-                Collider col = clump.GetComponent<Collider>();
-                if (col != null) Destroy(col);
-
-                if (_snowMaterial != null)
+                MeshFilter[] filters = scoopHead.GetComponentsInChildren<MeshFilter>(true);
+                for (int i = 0; i < filters.Length; i++)
                 {
-                    MeshRenderer mr = clump.GetComponent<MeshRenderer>();
-                    if (mr != null) mr.sharedMaterial = _snowMaterial;
+                    if (filters[i].name == "Shovel_BlackPlastic")
+                    {
+                        plasticMf = filters[i];
+                        break;
+                    }
+                }
+            }
+
+            if (plasticMf != null && plasticMf.sharedMesh != null)
+            {
+                Matrix4x4 plasticToScoopHead = Matrix4x4.identity;
+                Transform cursor = plasticMf.transform;
+                while (cursor != null && cursor != scoopHead)
+                {
+                    plasticToScoopHead = Matrix4x4.TRS(cursor.localPosition, cursor.localRotation, cursor.localScale) * plasticToScoopHead;
+                    cursor = cursor.parent;
+                }
+                if (cursor != scoopHead)
+                {
+                    plasticToScoopHead = scoopHead.worldToLocalMatrix * plasticMf.transform.localToWorldMatrix;
                 }
 
-                clump.SetActive(false);
-                _bladeClumpVisuals.Add(clump.transform);
+                _panCavityMap = ProceduralSnowMeshUtility.BuildShovelPanCavityMap(plasticMf.sharedMesh, plasticToScoopHead);
             }
+
+            _shovelSnowMesh = new Mesh
+            {
+                name = "ShovelScoopSnowMesh"
+            };
+            _shovelSnowMesh.MarkDynamic();
+
+            _shovelSnowMoundGo = new GameObject("ShovelSnowMound");
+            _shovelSnowMoundGo.transform.SetParent(bedRoot.transform, false);
+            _shovelSnowMoundGo.transform.localPosition = Vector3.zero;
+            _shovelSnowMoundGo.transform.localRotation = Quaternion.identity;
+            _shovelSnowMoundGo.transform.localScale = Vector3.one;
+
+            MeshFilter mf = _shovelSnowMoundGo.AddComponent<MeshFilter>();
+            mf.sharedMesh = _shovelSnowMesh;
+
+            MeshRenderer mr = _shovelSnowMoundGo.AddComponent<MeshRenderer>();
+            Material matToUse = _shovelSnowMaterialInstance != null ? _shovelSnowMaterialInstance : _snowMaterial;
+            if (matToUse != null)
+            {
+                mr.sharedMaterial = matToUse;
+            }
+
+            _shovelSnowMoundGo.SetActive(false);
         }
 
         private void Update()
@@ -397,7 +410,10 @@ namespace SnowFactory.Gameplay
                         RefreshBladeClumpBed();
                         FactoryEvents.RaiseShovelLoadChanged(_currentSnowLoad, infiniteTestingMode ? 999 : maxSnowCapacity);
 
-                        SpawnPourChunksToWheelbarrow(hoveredWheelbarrow, acceptedCount);
+                        SpawnPourChunksToWheelbarrow(
+                            hoveredWheelbarrow,
+                            acceptedCount,
+                            (float)transferredVal / Mathf.Max(1, acceptedCount));
                         FactoryEvents.RaiseStatusMessage(
                             $"Cargadas +{acceptedCount} palada(s) en la carretilla ({hoveredWheelbarrow.CurrentLoad}/{hoveredWheelbarrow.MaxCapacity}).");
                     }
@@ -454,7 +470,7 @@ namespace SnowFactory.Gameplay
                     _continuousDigCooldown = 0.11f;
                     FactoryEvents.RaiseShovelLoadChanged(_currentSnowLoad, infiniteTestingMode ? 999 : maxSnowCapacity);
 
-                    SpawnScoopChunkFromPile(targetHitPoint);
+                    SpawnScoopChunkFromPile(targetHitPoint, scoopedMultiplier);
 
                     if (scoopedTier == 2)
                     {
@@ -479,7 +495,7 @@ namespace SnowFactory.Gameplay
             }
         }
 
-        private void SpawnScoopChunkFromPile(Vector3 hitWorldPoint)
+        private void SpawnScoopChunkFromPile(Vector3 hitWorldPoint, float scoopMultiplier)
         {
             if (scoopHead == null)
             {
@@ -487,7 +503,7 @@ namespace SnowFactory.Gameplay
                 return;
             }
 
-            GameObject chunk = CreateFlyingSnowSphere(new Vector3(0.18f, 0.085f, 0.16f));
+            GameObject chunk = CreateFlyingSnowSphere(new Vector3(0.18f, 0.085f, 0.16f), _clodVariantCounter++, scoopMultiplier);
             chunk.transform.position = hitWorldPoint + Vector3.up * 0.04f;
 
             _flyingChunks.Add(new FlyingSnowChunk
@@ -556,7 +572,7 @@ namespace SnowFactory.Gameplay
             return distHoriz <= maxDistance ? wb : null;
         }
 
-        private void SpawnPourChunksToWheelbarrow(WheelbarrowController wb, int pouredCount)
+        private void SpawnPourChunksToWheelbarrow(WheelbarrowController wb, int pouredCount, float avgMultiplier = 1f)
         {
             if (wb == null) return;
             Vector3 startPos = scoopHead != null ? scoopHead.position : transform.position + transform.forward * 0.6f;
@@ -570,7 +586,7 @@ namespace SnowFactory.Gameplay
                     Random.Range(0.0f, 0.08f),
                     Random.Range(-0.14f, 0.14f));
 
-                GameObject chunk = CreateFlyingSnowSphere(new Vector3(0.18f, 0.085f, 0.17f));
+                GameObject chunk = CreateFlyingSnowSphere(new Vector3(0.18f, 0.085f, 0.17f), i + _clodVariantCounter++, avgMultiplier);
                 chunk.transform.position = startPos + jitter * 0.25f;
 
                 _flyingChunks.Add(new FlyingSnowChunk
@@ -594,6 +610,7 @@ namespace SnowFactory.Gameplay
         {
             Vector3 startPos = scoopHead != null ? scoopHead.position : transform.position + transform.forward * 0.6f;
             Vector3 targetFireCenter = fireplace.transform.position + new Vector3(0f, 0.68f, 0f);
+            float avgMultiplier = (float)deliveredValueUnits / Mathf.Max(1, deliveredScoops);
 
             int visualChunkCount = Mathf.Clamp(deliveredScoops, 1, 6);
             for (int i = 0; i < visualChunkCount; i++)
@@ -603,7 +620,7 @@ namespace SnowFactory.Gameplay
                     Random.Range(-0.05f, 0.12f),
                     Random.Range(-0.12f, 0.12f));
 
-                GameObject chunk = CreateFlyingSnowSphere(new Vector3(0.20f, 0.095f, 0.18f));
+                GameObject chunk = CreateFlyingSnowSphere(new Vector3(0.20f, 0.095f, 0.18f), i + _clodVariantCounter++, avgMultiplier);
                 chunk.transform.position = startPos + jitter * 0.35f;
 
                 _flyingChunks.Add(new FlyingSnowChunk
@@ -623,20 +640,27 @@ namespace SnowFactory.Gameplay
             }
         }
 
-        private GameObject CreateFlyingSnowSphere(Vector3 scale)
+        private GameObject CreateFlyingSnowSphere(Vector3 scale, int variant, float avgMultiplier)
         {
-            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            go.name = "FlyingSnowClump";
+            GameObject go = new GameObject("FlyingSnowClump");
             go.transform.localScale = scale;
             go.transform.rotation = Random.rotation;
 
-            Collider col = go.GetComponent<Collider>();
-            if (col != null) Destroy(col);
+            int iceTier = ProceduralSnowMeshUtility.HardnessMultiplierToIceTier(avgMultiplier);
+            MeshFilter mf = go.AddComponent<MeshFilter>();
+            mf.sharedMesh = ProceduralSnowMeshUtility.GetOrCreateSharedSnowClodMesh(variant, iceTier);
 
-            if (_snowMaterial != null)
+            MeshRenderer mr = go.AddComponent<MeshRenderer>();
+            Material baseMat = _shovelSnowMaterialInstance != null ? _shovelSnowMaterialInstance : _snowMaterial;
+            Material matToUse = ProceduralSnowMeshUtility.GetOrCreateCarriedSnowMaterial(
+                ref _flyingChunkMaterialInstance,
+                baseMat,
+                "M_ShovelFlyingChunkRuntime",
+                ProceduralSnowMeshUtility.CarriedSnowMaterialProfile.FlyingClod,
+                avgMultiplier);
+            if (matToUse != null)
             {
-                MeshRenderer mr = go.GetComponent<MeshRenderer>();
-                if (mr != null) mr.sharedMaterial = _snowMaterial;
+                mr.sharedMaterial = matToUse;
             }
             return go;
         }
@@ -655,7 +679,7 @@ namespace SnowFactory.Gameplay
 
                 float t = Mathf.Clamp01(item.Elapsed / item.Duration);
                 Vector3 endPos = item.IsScoopInward && item.FollowTarget != null
-                    ? item.FollowTarget.TransformPoint(new Vector3(0f, 0.04f, 0.0f))
+                    ? item.FollowTarget.TransformPoint(new Vector3(0f, 0.03f, 0.04f))
                     : item.EndWorldPos;
 
                 Vector3 linearPos = Vector3.Lerp(item.StartWorldPos, endPos, t);
@@ -826,27 +850,40 @@ namespace SnowFactory.Gameplay
         /// </summary>
         private void RefreshBladeClumpBed()
         {
-            if (_bladeClumpVisuals.Count == 0) return;
+            if (_shovelSnowMoundGo == null || _shovelSnowMesh == null || _panCavityMap == null) return;
 
             if (_currentSnowLoad <= 0)
             {
-                for (int i = 0; i < _bladeClumpVisuals.Count; i++)
-                {
-                    _bladeClumpVisuals[i].gameObject.SetActive(false);
-                }
+                _shovelSnowMoundGo.SetActive(false);
                 return;
             }
 
-            float fillRatio = Mathf.Clamp01((float)_currentSnowLoad / Mathf.Max(1, maxSnowCapacity));
-            int activeClumps = Mathf.Clamp(
-                Mathf.CeilToInt(fillRatio * _bladeClumpVisuals.Count),
-                1,
-                _bladeClumpVisuals.Count);
+            _shovelSnowMoundGo.SetActive(true);
+            float avgMultiplier = Mathf.Clamp((float)_accumulatedValueUnits / Mathf.Max(1, _currentSnowLoad), 1f, 3f);
+            ProceduralSnowMeshUtility.ApplyCarriedSnowHardnessTint(_shovelSnowMaterialInstance, avgMultiplier);
 
-            for (int i = 0; i < _bladeClumpVisuals.Count; i++)
+            float fillRatio = Mathf.Clamp01((float)_currentSnowLoad / Mathf.Max(1, maxSnowCapacity));
+            ProceduralSnowMeshUtility.UpdateShovelSnowMesh(_shovelSnowMesh, _panCavityMap, fillRatio, avgMultiplier);
+        }
+
+        private void OnDestroy()
+        {
+            if (_shovelSnowMesh != null)
             {
-                bool shouldShow = i < activeClumps;
-                _bladeClumpVisuals[i].gameObject.SetActive(shouldShow);
+                Destroy(_shovelSnowMesh);
+                _shovelSnowMesh = null;
+            }
+
+            if (_shovelSnowMaterialInstance != null)
+            {
+                Destroy(_shovelSnowMaterialInstance);
+                _shovelSnowMaterialInstance = null;
+            }
+
+            if (_flyingChunkMaterialInstance != null)
+            {
+                Destroy(_flyingChunkMaterialInstance);
+                _flyingChunkMaterialInstance = null;
             }
         }
 

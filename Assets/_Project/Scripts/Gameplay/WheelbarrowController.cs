@@ -49,50 +49,13 @@ namespace SnowFactory.Gameplay
         private float _dumpAnimTimer;
         private Vector3 _lastWheelWorldPos;
         private Material _traySnowMaterialInstance;
+        private Material _dumpChunkMaterialInstance;
+        private Mesh _traySnowMesh;
+        private GameObject _traySnowMoundGo;
+        private ProceduralSnowMeshUtility.ContainerCavityMap _cavityMap;
 
-        private readonly List<Transform> _trayClumpVisuals = new List<Transform>();
         private readonly List<DumpSnowChunk> _dumpChunks = new List<DumpSnowChunk>();
         private FireplaceHearth _cachedHearth;
-
-        // 14 organic snow mounds layered inside the tub (X: -0.22..+0.25, Y: 0.36..0.60, Z: -0.20..+0.34)
-        private static readonly Vector3[] TrayClumpOffsets =
-        {
-            // Bottom bed (6 clumps covering the floor of the tub)
-            new Vector3(-0.11f, 0.37f, -0.10f),
-            new Vector3( 0.13f, 0.37f, -0.10f),
-            new Vector3( 0.01f, 0.36f,  0.02f),
-            new Vector3(-0.13f, 0.38f,  0.14f),
-            new Vector3( 0.15f, 0.38f,  0.14f),
-            new Vector3( 0.02f, 0.37f,  0.26f),
-            // Middle layer (5 clumps filling the upper rim)
-            new Vector3(-0.08f, 0.45f, -0.02f),
-            new Vector3( 0.10f, 0.45f, -0.01f),
-            new Vector3( 0.01f, 0.46f,  0.11f),
-            new Vector3(-0.10f, 0.44f,  0.20f),
-            new Vector3( 0.11f, 0.44f,  0.21f),
-            // Top heaped crest (3 clumps rising above the tub rim)
-            new Vector3(-0.05f, 0.54f,  0.05f),
-            new Vector3( 0.07f, 0.54f,  0.08f),
-            new Vector3( 0.01f, 0.58f,  0.16f)
-        };
-
-        private static readonly Vector3[] TrayClumpScales =
-        {
-            new Vector3(0.32f, 0.15f, 0.32f),
-            new Vector3(0.32f, 0.15f, 0.32f),
-            new Vector3(0.36f, 0.16f, 0.36f),
-            new Vector3(0.31f, 0.15f, 0.31f),
-            new Vector3(0.31f, 0.15f, 0.31f),
-            new Vector3(0.34f, 0.14f, 0.30f),
-            new Vector3(0.33f, 0.16f, 0.33f),
-            new Vector3(0.33f, 0.16f, 0.33f),
-            new Vector3(0.38f, 0.18f, 0.36f),
-            new Vector3(0.30f, 0.15f, 0.30f),
-            new Vector3(0.30f, 0.15f, 0.30f),
-            new Vector3(0.32f, 0.16f, 0.32f),
-            new Vector3(0.31f, 0.16f, 0.31f),
-            new Vector3(0.35f, 0.18f, 0.34f)
-        };
 
         public bool IsDriving => _isDriving;
         public int CurrentLoad => _currentSnowLoad;
@@ -140,21 +103,14 @@ namespace SnowFactory.Gameplay
 
             if (snowMaterial == null)
             {
-                SnowPile anyPile = Object.FindFirstObjectByType<SnowPile>();
-                if (anyPile != null)
-                {
-                    MeshRenderer mr = anyPile.GetComponent<MeshRenderer>();
-                    if (mr != null) snowMaterial = mr.sharedMaterial;
-                }
+                snowMaterial = ProceduralSnowMeshUtility.FindSceneSnowMaterial();
             }
 
-            if (snowMaterial != null && _traySnowMaterialInstance == null)
-            {
-                _traySnowMaterialInstance = new Material(snowMaterial)
-                {
-                    name = "M_WheelbarrowSnowRuntime"
-                };
-            }
+            ProceduralSnowMeshUtility.GetOrCreateCarriedSnowMaterial(
+                ref _traySnowMaterialInstance,
+                snowMaterial,
+                "M_WheelbarrowSnowRuntime",
+                ProceduralSnowMeshUtility.CarriedSnowMaterialProfile.WheelbarrowMound);
         }
 
         private void BuildTraySnowBed()
@@ -165,41 +121,74 @@ namespace SnowFactory.Gameplay
             {
                 Destroy(traySnowRoot.GetChild(i).gameObject);
             }
-            _trayClumpVisuals.Clear();
 
-            for (int i = 0; i < TrayClumpOffsets.Length; i++)
+            if (_traySnowMesh != null)
             {
-                GameObject clump = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-                clump.name = $"WheelbarrowSnowClump_{i}";
-                clump.transform.SetParent(traySnowRoot, false);
-                clump.transform.localPosition = TrayClumpOffsets[i];
-                clump.transform.localRotation = Quaternion.Euler(
-                    (i * 17f) % 18f - 9f,
-                    (i * 53f) % 360f,
-                    (i * 23f) % 14f - 7f);
-                clump.transform.localScale = TrayClumpScales[i];
+                Destroy(_traySnowMesh);
+                _traySnowMesh = null;
+            }
+            _traySnowMoundGo = null;
+            _cavityMap = null;
 
-                Collider col = clump.GetComponent<Collider>();
-                if (col != null) Destroy(col);
+            Transform bodyTr = traySnowRoot.parent != null ? traySnowRoot.parent.Find("BodyAndTray") : null;
+            if (bodyTr == null)
+            {
+                bodyTr = transform.Find("TrayTiltPivot/BodyAndTray");
+            }
 
-                MeshRenderer mr = clump.GetComponent<MeshRenderer>();
-                if (mr != null && _traySnowMaterialInstance != null)
+            MeshFilter bodyMf = bodyTr != null ? bodyTr.GetComponentInChildren<MeshFilter>() : null;
+            if (bodyMf != null && bodyMf.sharedMesh != null)
+            {
+                Matrix4x4 bodyToSnowLocal;
+                if (bodyMf.transform.parent == traySnowRoot.parent && traySnowRoot.parent != null)
                 {
-                    mr.sharedMaterial = _traySnowMaterialInstance;
+                    Matrix4x4 snowLocal = Matrix4x4.TRS(traySnowRoot.localPosition, traySnowRoot.localRotation, traySnowRoot.localScale);
+                    Matrix4x4 bodyLocal = Matrix4x4.TRS(bodyMf.transform.localPosition, bodyMf.transform.localRotation, bodyMf.transform.localScale);
+                    bodyToSnowLocal = snowLocal.inverse * bodyLocal;
+                }
+                else
+                {
+                    bodyToSnowLocal = traySnowRoot.worldToLocalMatrix * bodyMf.transform.localToWorldMatrix;
                 }
 
-                clump.SetActive(false);
-                _trayClumpVisuals.Add(clump.transform);
+                _cavityMap = ProceduralSnowMeshUtility.BuildWheelbarrowCavityMap(bodyMf.sharedMesh, bodyToSnowLocal);
             }
+
+            _traySnowMesh = new Mesh
+            {
+                name = "WheelbarrowTraySnowMesh"
+            };
+            _traySnowMesh.MarkDynamic();
+
+            _traySnowMoundGo = new GameObject("WheelbarrowSnowMound");
+            _traySnowMoundGo.transform.SetParent(traySnowRoot, false);
+            _traySnowMoundGo.transform.localPosition = Vector3.zero;
+            _traySnowMoundGo.transform.localRotation = Quaternion.identity;
+            _traySnowMoundGo.transform.localScale = Vector3.one;
+
+            MeshFilter mf = _traySnowMoundGo.AddComponent<MeshFilter>();
+            mf.sharedMesh = _traySnowMesh;
+
+            MeshRenderer mr = _traySnowMoundGo.AddComponent<MeshRenderer>();
+            if (_traySnowMaterialInstance != null)
+            {
+                mr.sharedMaterial = _traySnowMaterialInstance;
+            }
+            else if (snowMaterial != null)
+            {
+                mr.sharedMaterial = snowMaterial;
+            }
+
+            _traySnowMoundGo.SetActive(false);
         }
 
         public Vector3 GetTrayReceiveWorldPoint()
         {
             if (traySnowRoot != null)
             {
-                return traySnowRoot.TransformPoint(new Vector3(0.02f, 0.50f, 0.08f));
+                return traySnowRoot.TransformPoint(new Vector3(0.0175f, 0.54f, -0.06f));
             }
-            return transform.position + Vector3.up * 0.5f;
+            return transform.position + Vector3.up * 0.54f;
         }
 
         public bool TryReceiveFromShovel(int scoopCount, int totalValueUnits, out int acceptedCount)
@@ -265,7 +254,14 @@ namespace SnowFactory.Gameplay
             Vector3 startPos = GetTrayReceiveWorldPoint();
             Vector3 fireCenter = hearth.transform.position + new Vector3(0f, 0.72f, 0f);
             float avgTierValue = (float)deliveredValueUnits / Mathf.Max(1, deliveredScoops);
-            Material chunkMat = CreateTintedChunkMaterial(avgTierValue);
+            int iceTier = ProceduralSnowMeshUtility.HardnessMultiplierToIceTier(avgTierValue);
+            Material baseMat = _traySnowMaterialInstance != null ? _traySnowMaterialInstance : snowMaterial;
+            Material chunkMat = ProceduralSnowMeshUtility.GetOrCreateCarriedSnowMaterial(
+                ref _dumpChunkMaterialInstance,
+                baseMat,
+                "M_WheelbarrowDumpChunkRuntime",
+                ProceduralSnowMeshUtility.CarriedSnowMaterialProfile.FlyingClod,
+                avgTierValue);
 
             int chunkCount = Mathf.Clamp(Mathf.CeilToInt(deliveredScoops * 0.5f) + 2, 3, 12);
             for (int i = 0; i < chunkCount; i++)
@@ -275,17 +271,19 @@ namespace SnowFactory.Gameplay
                     Random.Range(-0.04f, 0.16f),
                     Random.Range(-0.18f, 0.18f));
 
-                GameObject go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-                go.name = "WheelbarrowDumpChunk";
+                GameObject go = new GameObject("WheelbarrowDumpChunk");
                 go.transform.position = startPos + spread * 0.45f;
-                go.transform.localScale = new Vector3(0.24f, 0.14f, 0.22f);
+                go.transform.localScale = new Vector3(
+                    Random.Range(0.16f, 0.24f),
+                    Random.Range(0.11f, 0.17f),
+                    Random.Range(0.16f, 0.23f));
                 go.transform.rotation = Random.rotation;
 
-                Collider col = go.GetComponent<Collider>();
-                if (col != null) Destroy(col);
+                MeshFilter mf = go.AddComponent<MeshFilter>();
+                mf.sharedMesh = ProceduralSnowMeshUtility.GetOrCreateSharedSnowClodMesh(i, iceTier);
 
-                MeshRenderer mr = go.GetComponent<MeshRenderer>();
-                if (mr != null && chunkMat != null)
+                MeshRenderer mr = go.AddComponent<MeshRenderer>();
+                if (chunkMat != null)
                 {
                     mr.sharedMaterial = chunkMat;
                 }
@@ -303,12 +301,6 @@ namespace SnowFactory.Gameplay
                     DeliveredValueUnits = deliveredValueUnits
                 });
             }
-        }
-
-        private Material CreateTintedChunkMaterial(float avgValueMultiplier)
-        {
-            if (_traySnowMaterialInstance == null) return snowMaterial;
-            return _traySnowMaterialInstance;
         }
 
         public void EnterDriving(FirstPersonController driver, ShovelController shovel)
@@ -553,37 +545,42 @@ namespace SnowFactory.Gameplay
 
         private void RefreshTraySnowVisuals()
         {
-            if (_trayClumpVisuals.Count == 0) return;
+            if (_traySnowMoundGo == null || _traySnowMesh == null || _cavityMap == null) return;
 
             if (_currentSnowLoad <= 0)
             {
-                for (int i = 0; i < _trayClumpVisuals.Count; i++)
-                {
-                    _trayClumpVisuals[i].gameObject.SetActive(false);
-                }
+                _traySnowMoundGo.SetActive(false);
                 return;
             }
 
-            // Tint snow pile subtly toward icy cyan/glacier when carrying valuable ice/glacier layers
-            if (_traySnowMaterialInstance != null)
-            {
-                float avgMultiplier = Mathf.Clamp((float)_accumulatedValueUnits / _currentSnowLoad, 1f, 3f);
-                float glacierT = Mathf.Clamp01((avgMultiplier - 1f) * 0.5f);
-                Color litColor = Color.Lerp(new Color(0.98f, 0.99f, 1.0f), new Color(0.55f, 0.86f, 1.0f), glacierT);
-                Color shadowColor = Color.Lerp(new Color(0.58f, 0.73f, 0.89f), new Color(0.16f, 0.45f, 0.88f), glacierT);
-                _traySnowMaterialInstance.SetColor("_LitSnowColor", litColor);
-                _traySnowMaterialInstance.SetColor("_ShadowSnowColor", shadowColor);
-            }
+            _traySnowMoundGo.SetActive(true);
+
+            // Keep sunlit snow natural crisp white while subtly deepening alpine shadow tone for higher-tier ice loads.
+            float avgMultiplier = Mathf.Clamp((float)_accumulatedValueUnits / _currentSnowLoad, 1f, 3f);
+            ProceduralSnowMeshUtility.ApplyCarriedSnowHardnessTint(_traySnowMaterialInstance, avgMultiplier);
 
             float fillRatio = Mathf.Clamp01((float)_currentSnowLoad / Mathf.Max(1, maxCapacity));
-            int activeCount = Mathf.Clamp(
-                Mathf.CeilToInt(fillRatio * _trayClumpVisuals.Count),
-                1,
-                _trayClumpVisuals.Count);
+            ProceduralSnowMeshUtility.UpdateWheelbarrowSnowMesh(_traySnowMesh, _cavityMap, fillRatio, avgMultiplier);
+        }
 
-            for (int i = 0; i < _trayClumpVisuals.Count; i++)
+        private void OnDestroy()
+        {
+            if (_traySnowMesh != null)
             {
-                _trayClumpVisuals[i].gameObject.SetActive(i < activeCount);
+                Destroy(_traySnowMesh);
+                _traySnowMesh = null;
+            }
+
+            if (_traySnowMaterialInstance != null)
+            {
+                Destroy(_traySnowMaterialInstance);
+                _traySnowMaterialInstance = null;
+            }
+
+            if (_dumpChunkMaterialInstance != null)
+            {
+                Destroy(_dumpChunkMaterialInstance);
+                _dumpChunkMaterialInstance = null;
             }
         }
     }
